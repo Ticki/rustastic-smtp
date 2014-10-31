@@ -55,7 +55,7 @@ pub fn get_handlers<S: Writer+Reader, E: SmtpServerEventHandler>() -> Vec<SmtpHa
     handlers
 }
 
-#[allow(unused_variable)]
+#[allow(unused_variables)]
 fn handle_command_helo<S: Writer+Reader, E: SmtpServerEventHandler>(stream: &mut SmtpStream<S>,
                        state: &mut SmtpTransactionState,
                        config: &SmtpServerConfig,
@@ -83,7 +83,7 @@ fn test_command_helo() {
     // fail!();
 }
 
-#[allow(unused_variable)]
+#[allow(unused_variables)]
 fn handle_command_mail<S: Writer+Reader, E: SmtpServerEventHandler>(stream: &mut SmtpStream<S>,
                        state: &mut SmtpTransactionState,
                        config: &SmtpServerConfig,
@@ -127,7 +127,7 @@ fn test_command_mail() {
     // fail!();
 }
 
-#[allow(unused_variable)]
+#[allow(unused_variables)]
 fn handle_command_rcpt<S: Writer+Reader, E: SmtpServerEventHandler>(stream: &mut SmtpStream<S>,
                        state: &mut SmtpTransactionState,
                        config: &SmtpServerConfig,
@@ -165,7 +165,7 @@ fn test_command_rcpt() {
     // fail!();
 }
 
-#[allow(unused_variable)]
+#[allow(unused_variables)]
 fn handle_command_data<S: Writer+Reader, E: SmtpServerEventHandler>(stream: &mut SmtpStream<S>,
                        state: &mut SmtpTransactionState,
                        config: &SmtpServerConfig,
@@ -178,7 +178,7 @@ fn handle_command_data<S: Writer+Reader, E: SmtpServerEventHandler>(stream: &mut
 
         // Inform our event handler that mail data is about to be received.
         event_handler.handle_body_start().unwrap();
-        
+
         let mut size = 0;
         loop {
             let read_line = stream.read_line();
@@ -228,7 +228,7 @@ fn test_command_data() {
     // fail!();
 }
 
-#[allow(unused_variable)]
+#[allow(unused_variables)]
 fn handle_command_rset<S: Writer+Reader, E: SmtpServerEventHandler>(stream: &mut SmtpStream<S>,
                        state: &mut SmtpTransactionState,
                        config: &SmtpServerConfig,
@@ -247,7 +247,7 @@ fn test_command_rset() {
     // fail!();
 }
 
-#[allow(unused_variable)]
+#[allow(unused_variables)]
 fn handle_command_vrfy<S: Writer+Reader, E: SmtpServerEventHandler>(stream: &mut SmtpStream<S>,
                        state: &mut SmtpTransactionState,
                        config: &SmtpServerConfig,
@@ -261,7 +261,7 @@ fn test_command_vrfy() {
     // fail!();
 }
 
-#[allow(unused_variable)]
+#[allow(unused_variables)]
 fn handle_command_expn<S: Writer+Reader, E: SmtpServerEventHandler>(stream: &mut SmtpStream<S>,
                        state: &mut SmtpTransactionState,
                        config: &SmtpServerConfig,
@@ -275,7 +275,7 @@ fn test_command_expn() {
     // fail!();
 }
 
-#[allow(unused_variable)]
+#[allow(unused_variables)]
 fn handle_command_help<S: Writer+Reader, E: SmtpServerEventHandler>(stream: &mut SmtpStream<S>,
                        state: &mut SmtpTransactionState,
                        config: &SmtpServerConfig,
@@ -293,7 +293,7 @@ fn test_command_help() {
     // fail!();
 }
 
-#[allow(unused_variable)]
+#[allow(unused_variables)]
 fn handle_command_noop<S: Writer+Reader, E: SmtpServerEventHandler>(stream: &mut SmtpStream<S>,
                        state: &mut SmtpTransactionState,
                        config: &SmtpServerConfig,
@@ -311,7 +311,7 @@ fn test_command_noop() {
     // fail!();
 }
 
-#[allow(unused_variable)]
+#[allow(unused_variables)]
 fn handle_command_quit<S: Writer+Reader, E: SmtpServerEventHandler>(stream: &mut SmtpStream<S>,
                        state: &mut SmtpTransactionState,
                        config: &SmtpServerConfig,

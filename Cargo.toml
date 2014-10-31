@@ -1,5 +1,5 @@
 [package]
 
 name = "rsmtp"
-version = "0.0.1"
+version = "0.0.2"
 authors = ["Conrad Kleinespel <conradk@conradk.com>"]

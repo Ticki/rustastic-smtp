@@ -170,14 +170,14 @@ impl<S: Reader+Writer> SmtpStream<S> {
                                     kind: InvalidInput,
                                     desc: LINE_TOO_LONG,
                                     detail: None
-                                })                                
+                                })
                             }
                         }
                     },
                     Err(err) => {
                         Err(err)
                     }
-                }                
+                }
             }
         };
 
@@ -246,7 +246,7 @@ fn test_limits() {
     file = File::open(&path).unwrap();
     stream = SmtpStream::new(file, 3, false);
     match stream.read_line() {
-        Ok(_) => fail!(),
+        Ok(_) => panic!(),
         Err(err) => {
             assert_eq!("line too long", err.desc);
             assert_eq!(InvalidInput, err.kind);

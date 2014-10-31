@@ -42,7 +42,7 @@ pub trait SmtpServerEventHandler {
     /// to log the server information or anything else you desire.
     ///
     /// If `Err(())` is returned, the connection is aborted.
-    #[allow(unused_variable)]
+    #[allow(unused_variables)]
     fn handle_connection(&mut self, client_ip: &IpAddr) -> Result<(), ()> {
         Ok(())
     }
@@ -50,7 +50,7 @@ pub trait SmtpServerEventHandler {
     /// Called when we know the domain the client identifies itself with.
     ///
     /// If `Err(())` is returned, the connection is aborted.
-    #[allow(unused_variable)]
+    #[allow(unused_variables)]
     fn handle_domain(&mut self, domain: &str) -> Result<(), ()> {
         Ok(())
     }
@@ -64,7 +64,7 @@ pub trait SmtpServerEventHandler {
     ///
     /// If `Ok(())` is returned, a 250 response is sent. If `Err(())` is returned, a 550 response
     /// is sent and the sender is discarded.
-    #[allow(unused_variable)]
+    #[allow(unused_variables)]
     fn handle_sender_address(&mut self, mailbox: Option<&Mailbox>) -> Result<(), ()> {
         Ok(())
     }
@@ -73,7 +73,7 @@ pub trait SmtpServerEventHandler {
     ///
     /// If `Ok(())` is returned, a 250 response is sent. If `Err(())` is returned, a 550 response
     /// is sent and the recipient is discarded.
-    #[allow(unused_variable)]
+    #[allow(unused_variables)]
     fn handle_receiver_address(&mut self, mailbox: &Mailbox) -> Result<(), ()> {
         Ok(())
     }
@@ -85,7 +85,7 @@ pub trait SmtpServerEventHandler {
     /// where you want to send the body.
     ///
     /// If `Err(())` is returned, the connection is aborted.
-    #[allow(unused_variable)]
+    #[allow(unused_variables)]
     fn handle_body_start(&mut self) -> Result<(), ()> {
         Ok(())
     }
@@ -100,7 +100,7 @@ pub trait SmtpServerEventHandler {
     /// API or whatever you wish to do.
     ///
     /// If `Err(())` is returned, the connection is aborted.
-    #[allow(unused_variable)]
+    #[allow(unused_variables)]
     fn handle_body_part(&mut self, part: &[u8]) -> Result<(), ()> {
         Ok(())
     }
@@ -111,7 +111,7 @@ pub trait SmtpServerEventHandler {
     /// to close the HTTP client.
     ///
     /// If `Err(())` is returned, the connection is aborted.
-    #[allow(unused_variable)]
+    #[allow(unused_variables)]
     fn handle_body_end(&mut self) -> Result<(), ()> {
         Ok(())
     }
@@ -260,7 +260,7 @@ impl<E: SmtpServerEventHandler + Clone + Send> SmtpServer<TcpStream, TcpAcceptor
 
         // Send the opening welcome message.
         stream.write_line(format!("220 {}", config.domain).as_slice()).unwrap();
-        
+
 
         // Loop over incoming commands and process them.
         SmtpServer::inner_loop(
@@ -370,7 +370,7 @@ impl<E: SmtpServerEventHandler + Clone + Send> SmtpServer<TcpStream, TcpAcceptor
                     stream.write_line(msg.as_slice()).unwrap();
                 },
                 Err(err) => {
-                    fail!(err);
+                    panic!(err);
                 }
             }
         }
