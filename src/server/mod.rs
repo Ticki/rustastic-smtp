@@ -18,7 +18,7 @@
 use std::io::net::tcp::{TcpListener, TcpAcceptor, TcpStream};
 use std::io::net::ip::{IpAddr};
 use std::io::{Listener, Acceptor, IoError, Reader, Writer, InvalidInput};
-use super::common::stream::{SmtpStream};
+use super::common::stream::{SmtpReader, SmtpWriter};
 use std::sync::Arc;
 use std::ascii::OwnedAsciiExt;
 use super::common::transaction::{SmtpTransactionState, Init};
@@ -253,18 +253,19 @@ impl<E: SmtpServerEventHandler + Clone + Send> SmtpServer<TcpStream, TcpAcceptor
         // TODO: remove unwrap and handle error
         event_handler.handle_connection(&stream.peer_name().unwrap().ip).unwrap();
 
-        let mut stream = SmtpStream::new(stream.clone(), config.max_line_size, config.debug);
+        let mut input = SmtpReader::new(stream.clone(), config.max_line_size, config.debug);
+        let mut output = SmtpWriter::new(stream.clone(), config.debug);
 
         // TODO: WAIT FOR: https://github.com/rust-lang/rust/issues/15802
         //stream.stream.set_deadline(local_config.timeout);
 
         // Send the opening welcome message.
-        stream.write_line(format!("220 {}", config.domain).as_slice()).unwrap();
-
+        output.write_line(format!("220 {}", config.domain).as_slice()).unwrap();
 
         // Loop over incoming commands and process them.
         SmtpServer::inner_loop(
-            &mut stream,
+            &mut input,
+            &mut output,
             config,
             event_handler,
             handlers
@@ -293,9 +294,9 @@ impl<E: SmtpServerEventHandler + Clone + Send> SmtpServer<TcpStream, TcpAcceptor
     }
 
     fn get_line_and_handler<'a>(
-            stream: &mut SmtpStream<TcpStream>,
+            input: &mut SmtpReader<TcpStream>,
             handlers: &'a [handler::SmtpHandler<TcpStream, E>]) -> Result<(String, Option<&'a handler::SmtpHandler<TcpStream, E>>), IoError> {
-        match stream.read_line() {
+        match input.read_line() {
             Ok(bytes) => {
                 let line = String::from_utf8_lossy(bytes.as_slice()).into_string();
                 let handler = SmtpServer::get_handler_for_line(handlers, line.as_slice());
@@ -309,17 +310,19 @@ impl<E: SmtpServerEventHandler + Clone + Send> SmtpServer<TcpStream, TcpAcceptor
     }
 
     fn get_reply(
-            stream: &mut SmtpStream<TcpStream>,
+            input: &mut SmtpReader<TcpStream>,
+            output: &mut SmtpWriter<TcpStream>,
             handlers: &[handler::SmtpHandler<TcpStream, E>],
             state: &mut SmtpTransactionState,
             config: &SmtpServerConfig,
             event_handler: &mut E) -> Result<String, Option<String>> {
-        match SmtpServer::get_line_and_handler(stream, handlers) {
+        match SmtpServer::get_line_and_handler(input, handlers) {
             Ok((line, Some(handler))) => {
                 if handler.allowed_states.contains(state) {
                     let rest = line.as_slice().slice_from(handler.command_start.len());
                     (handler.callback)(
-                        stream,
+                        input,
+                        output,
                         state,
                         config,
                         event_handler,
@@ -350,7 +353,8 @@ impl<E: SmtpServerEventHandler + Clone + Send> SmtpServer<TcpStream, TcpAcceptor
 
     // Forever, looooop over command lines and handle them.
     fn inner_loop(
-            stream: &mut SmtpStream<TcpStream>,
+            input: &mut SmtpReader<TcpStream>,
+            output: &mut SmtpWriter<TcpStream>,
             config: Arc<SmtpServerConfig>,
             event_handler: &mut E,
             handlers: Arc<Vec<handler::SmtpHandler<TcpStream, E>>>) {
@@ -358,7 +362,8 @@ impl<E: SmtpServerEventHandler + Clone + Send> SmtpServer<TcpStream, TcpAcceptor
         let mut state = Init;
         'main_loop: loop {
             let reply = SmtpServer::get_reply(
-                stream,
+                input,
+                output,
                 handlers.as_slice(),
                 &mut state,
                 config.deref(),
@@ -367,7 +372,7 @@ impl<E: SmtpServerEventHandler + Clone + Send> SmtpServer<TcpStream, TcpAcceptor
 
             match reply {
                 Ok(msg) => {
-                    stream.write_line(msg.as_slice()).unwrap();
+                    output.write_line(msg.as_slice()).unwrap();
                 },
                 Err(err) => {
                     panic!(err);

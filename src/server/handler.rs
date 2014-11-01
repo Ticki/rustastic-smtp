@@ -14,7 +14,7 @@
 
 use super::SmtpServerConfig;
 use super::SmtpServerEventHandler;
-use super::super::common::stream::{SmtpStream};
+use super::super::common::stream::{SmtpReader, SmtpWriter};
 use super::super::common::utils;
 use super::super::common::mailbox::Mailbox;
 use super::super::common::transaction::{SmtpTransactionState, Init, Helo, Mail, Rcpt, Data};
@@ -24,11 +24,11 @@ use super::super::common::transaction::{SmtpTransactionState, Init, Helo, Mail, 
 pub struct SmtpHandler<S: Writer+Reader, E: SmtpServerEventHandler> {
     pub command_start: String,
     pub allowed_states: Vec<SmtpTransactionState>,
-    pub callback: fn(&mut SmtpStream<S>, &mut SmtpTransactionState, &SmtpServerConfig, &mut E, &str) -> Result<String, Option<String>>
+    pub callback: fn(&mut SmtpReader<S>, &mut SmtpWriter<S>, &mut SmtpTransactionState, &SmtpServerConfig, &mut E, &str) -> Result<String, Option<String>>
 }
 
 impl<S: Writer+Reader, E: SmtpServerEventHandler> SmtpHandler<S, E> {
-    fn new(command_start: &str, allowed_states: &[SmtpTransactionState], callback: fn(&mut SmtpStream<S>, &mut SmtpTransactionState, &SmtpServerConfig, &mut E, &str) -> Result<String, Option<String>>) -> SmtpHandler<S, E> {
+    fn new(command_start: &str, allowed_states: &[SmtpTransactionState], callback: fn(&mut SmtpReader<S>, &mut SmtpWriter<S>, &mut SmtpTransactionState, &SmtpServerConfig, &mut E, &str) -> Result<String, Option<String>>) -> SmtpHandler<S, E> {
         SmtpHandler {
             command_start: command_start.into_string(),
             allowed_states: allowed_states.to_vec(),
@@ -56,11 +56,13 @@ pub fn get_handlers<S: Writer+Reader, E: SmtpServerEventHandler>() -> Vec<SmtpHa
 }
 
 #[allow(unused_variables)]
-fn handle_command_helo<S: Writer+Reader, E: SmtpServerEventHandler>(stream: &mut SmtpStream<S>,
-                       state: &mut SmtpTransactionState,
-                       config: &SmtpServerConfig,
-                       event_handler: &mut E,
-                       line: &str) -> Result<String, Option<String>> {
+fn handle_command_helo<S: Writer+Reader, E: SmtpServerEventHandler>(
+                        input: &mut SmtpReader<S>,
+                        output: &mut SmtpWriter<S>,
+                        state: &mut SmtpTransactionState,
+                        config: &SmtpServerConfig,
+                        event_handler: &mut E,
+                        line: &str) -> Result<String, Option<String>> {
     if line.len() == 0 {
         Ok("501 Domain name not provided".into_string())
     } else if utils::get_domain_len(line) != line.len() {
@@ -84,11 +86,13 @@ fn test_command_helo() {
 }
 
 #[allow(unused_variables)]
-fn handle_command_mail<S: Writer+Reader, E: SmtpServerEventHandler>(stream: &mut SmtpStream<S>,
-                       state: &mut SmtpTransactionState,
-                       config: &SmtpServerConfig,
-                       event_handler: &mut E,
-                       line: &str) -> Result<String, Option<String>> {
+fn handle_command_mail<S: Writer+Reader, E: SmtpServerEventHandler>(
+                        input: &mut SmtpReader<S>,
+                        output: &mut SmtpWriter<S>,
+                        state: &mut SmtpTransactionState,
+                        config: &SmtpServerConfig,
+                        event_handler: &mut E,
+                        line: &str) -> Result<String, Option<String>> {
     if line.len() < 2 || line.char_at(0) != '<' || line.char_at(line.len() - 1) != '>' {
         Ok("501 Email address invalid, must start with < and end with >".into_string())
     } else if line == "<>" {
@@ -128,11 +132,13 @@ fn test_command_mail() {
 }
 
 #[allow(unused_variables)]
-fn handle_command_rcpt<S: Writer+Reader, E: SmtpServerEventHandler>(stream: &mut SmtpStream<S>,
-                       state: &mut SmtpTransactionState,
-                       config: &SmtpServerConfig,
-                       event_handler: &mut E,
-                       line: &str) -> Result<String, Option<String>> {
+fn handle_command_rcpt<S: Writer+Reader, E: SmtpServerEventHandler>(
+                        input: &mut SmtpReader<S>,
+                        output: &mut SmtpWriter<S>,
+                        state: &mut SmtpTransactionState,
+                        config: &SmtpServerConfig,
+                        event_handler: &mut E,
+                        line: &str) -> Result<String, Option<String>> {
     // TODO: check maximum number of recipients? Maybe after the event handler
     // sends back `Ok(())`?
     if false {
@@ -166,51 +172,51 @@ fn test_command_rcpt() {
 }
 
 #[allow(unused_variables)]
-fn handle_command_data<S: Writer+Reader, E: SmtpServerEventHandler>(stream: &mut SmtpStream<S>,
-                       state: &mut SmtpTransactionState,
-                       config: &SmtpServerConfig,
-                       event_handler: &mut E,
-                       line: &str) -> Result<String, Option<String>> {
+fn handle_command_data<S: Writer+Reader, E: SmtpServerEventHandler>(
+                        input: &mut SmtpReader<S>,
+                        output: &mut SmtpWriter<S>,
+                        state: &mut SmtpTransactionState,
+                        config: &SmtpServerConfig,
+                        event_handler: &mut E,
+                        line: &str) -> Result<String, Option<String>> {
     if line.len() != 0 {
         Ok("501 No arguments allowed".into_string())
     } else {
-        stream.write_line("354 Start mail input; end with <CRLF>.<CRLF>").unwrap();
+        output.write_line("354 Start mail input; end with <CRLF>.<CRLF>").unwrap();
 
         // Inform our event handler that mail data is about to be received.
         event_handler.handle_body_start().unwrap();
 
         let mut size = 0;
         loop {
-            let read_line = stream.read_line();
-            let ok = read_line.is_ok();
+            match input.read_line() {
+                Ok(data_line) => {
+                    // Here, we check that we have already got some data, which
+                    // means that we have read a line, which means we have just
+                    // seen `<CRLF>`. And then, we check if the current line
+                    // which we know to end with `<CRLF>` as well contains a
+                    // single dot.
+                    // All in all, this means we check for `<CRLF>.<CRLF>`.
+                    if size != 0 && data_line == &['.' as u8] {
+                        break;
+                    }
+                    // TODO: support transparency. Here or in the reader ?
 
-            if ok {
-                let read_line = read_line.unwrap();
+                    event_handler.handle_body_part(data_line).unwrap();
 
-                // Here, we check that we have already got some data, which
-                // means that we have read a line, which means we have just
-                // seen `<CRLF>`. And then, we check if the current line
-                // which we know to end with `<CRLF>` as well contains a
-                // single dot.
-                // All in all, this means we check for `<CRLF>.<CRLF>`.
-                if size != 0 && read_line == &['.' as u8] {
-                    break;
+                    size += data_line.len();
+
+                    if size > config.max_message_size {
+                        // TODO: add an error handler in the event handler?
+                        return Ok(format!(
+                            "552 Too much mail data, max {} bytes",
+                            config.max_message_size
+                        ));
+                    }
+                },
+                Err(err) => {
+                    return Err(None);
                 }
-                // TODO: support transparency. Here or in the reader ?
-
-                event_handler.handle_body_part(read_line).unwrap();
-
-                size += read_line.len();
-
-                if size > config.max_message_size {
-                    // TODO: add an error handler in the event handler?
-                    return Ok(format!(
-                        "552 Too much mail data, max {} bytes",
-                        config.max_message_size
-                    ));
-                }
-            } else {
-                return Err(None);
             }
         }
 
@@ -229,11 +235,13 @@ fn test_command_data() {
 }
 
 #[allow(unused_variables)]
-fn handle_command_rset<S: Writer+Reader, E: SmtpServerEventHandler>(stream: &mut SmtpStream<S>,
-                       state: &mut SmtpTransactionState,
-                       config: &SmtpServerConfig,
-                       event_handler: &mut E,
-                       line: &str) -> Result<String, Option<String>> {
+fn handle_command_rset<S: Writer+Reader, E: SmtpServerEventHandler>(
+                        input: &mut SmtpReader<S>,
+                        output: &mut SmtpWriter<S>,
+                        state: &mut SmtpTransactionState,
+                        config: &SmtpServerConfig,
+                        event_handler: &mut E,
+                        line: &str) -> Result<String, Option<String>> {
     if line.len() != 0 {
         Ok("501 No arguments allowed".into_string())
     } else {
@@ -248,11 +256,13 @@ fn test_command_rset() {
 }
 
 #[allow(unused_variables)]
-fn handle_command_vrfy<S: Writer+Reader, E: SmtpServerEventHandler>(stream: &mut SmtpStream<S>,
-                       state: &mut SmtpTransactionState,
-                       config: &SmtpServerConfig,
-                       event_handler: &mut E,
-                       line: &str) -> Result<String, Option<String>> {
+fn handle_command_vrfy<S: Writer+Reader, E: SmtpServerEventHandler>(
+                        input: &mut SmtpReader<S>,
+                        output: &mut SmtpWriter<S>,
+                        state: &mut SmtpTransactionState,
+                        config: &SmtpServerConfig,
+                        event_handler: &mut E,
+                        line: &str) -> Result<String, Option<String>> {
     Ok("252 Cannot VRFY user".into_string())
 }
 
@@ -262,11 +272,13 @@ fn test_command_vrfy() {
 }
 
 #[allow(unused_variables)]
-fn handle_command_expn<S: Writer+Reader, E: SmtpServerEventHandler>(stream: &mut SmtpStream<S>,
-                       state: &mut SmtpTransactionState,
-                       config: &SmtpServerConfig,
-                       event_handler: &mut E,
-                       line: &str) -> Result<String, Option<String>> {
+fn handle_command_expn<S: Writer+Reader, E: SmtpServerEventHandler>(
+                        input: &mut SmtpReader<S>,
+                        output: &mut SmtpWriter<S>,
+                        state: &mut SmtpTransactionState,
+                        config: &SmtpServerConfig,
+                        event_handler: &mut E,
+                        line: &str) -> Result<String, Option<String>> {
     Ok("252 Cannot EXPN mailing list".into_string())
 }
 
@@ -276,11 +288,13 @@ fn test_command_expn() {
 }
 
 #[allow(unused_variables)]
-fn handle_command_help<S: Writer+Reader, E: SmtpServerEventHandler>(stream: &mut SmtpStream<S>,
-                       state: &mut SmtpTransactionState,
-                       config: &SmtpServerConfig,
-                       event_handler: &mut E,
-                       line: &str) -> Result<String, Option<String>> {
+fn handle_command_help<S: Writer+Reader, E: SmtpServerEventHandler>(
+                        input: &mut SmtpReader<S>,
+                        output: &mut SmtpWriter<S>,
+                        state: &mut SmtpTransactionState,
+                        config: &SmtpServerConfig,
+                        event_handler: &mut E,
+                        line: &str) -> Result<String, Option<String>> {
     if line.len() == 0 || line.char_at(0) == ' ' {
         Ok("502 Command not implemented".into_string())
     } else {
@@ -294,11 +308,13 @@ fn test_command_help() {
 }
 
 #[allow(unused_variables)]
-fn handle_command_noop<S: Writer+Reader, E: SmtpServerEventHandler>(stream: &mut SmtpStream<S>,
-                       state: &mut SmtpTransactionState,
-                       config: &SmtpServerConfig,
-                       event_handler: &mut E,
-                       line: &str) -> Result<String, Option<String>> {
+fn handle_command_noop<S: Writer+Reader, E: SmtpServerEventHandler>(
+                        input: &mut SmtpReader<S>,
+                        output: &mut SmtpWriter<S>,
+                        state: &mut SmtpTransactionState,
+                        config: &SmtpServerConfig,
+                        event_handler: &mut E,
+                        line: &str) -> Result<String, Option<String>> {
     if line.len() == 0 || line.char_at(0) == ' ' {
         Ok("250 OK".into_string())
     } else {
@@ -312,11 +328,13 @@ fn test_command_noop() {
 }
 
 #[allow(unused_variables)]
-fn handle_command_quit<S: Writer+Reader, E: SmtpServerEventHandler>(stream: &mut SmtpStream<S>,
-                       state: &mut SmtpTransactionState,
-                       config: &SmtpServerConfig,
-                       event_handler: &mut E,
-                       line: &str) -> Result<String, Option<String>> {
+fn handle_command_quit<S: Writer+Reader, E: SmtpServerEventHandler>(
+                        input: &mut SmtpReader<S>,
+                        output: &mut SmtpWriter<S>,
+                        state: &mut SmtpTransactionState,
+                        config: &SmtpServerConfig,
+                        event_handler: &mut E,
+                        line: &str) -> Result<String, Option<String>> {
     Err(Some(format!("221 {}", config.domain)))
 }
 

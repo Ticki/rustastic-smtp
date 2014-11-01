@@ -7,7 +7,7 @@ If you are working on this or want on this, please open an issue so that other p
 
 ## Things that are needed now
 
-* Use the return values of event handlers.
+* Use the return values of event handlers and clearly define what they do.
 * Update event handler docs.
 * Switching the utils to using `Option` instead of `return 0` to convey the absence of something. Make unsafe functions `unsafe`.
 * Support for timeout configuration. See: https://github.com/rust-lang/rust/issues/15802.
