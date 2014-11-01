@@ -21,15 +21,32 @@ use std::io::{Listener, Acceptor, IoError, Reader, Writer, InvalidInput};
 use super::common::stream::{SmtpReader, SmtpWriter};
 use std::sync::Arc;
 use std::ascii::OwnedAsciiExt;
-use super::common::transaction::{SmtpTransactionState, Init};
+use super::common::transaction::{SmtpTransactionState, Init, Helo, Mail, Rcpt, Data};
 use super::common::mailbox::Mailbox;
 use super::common::{
     MIN_ALLOWED_MESSAGE_SIZE,
     MIN_ALLOWED_LINE_SIZE,
     MIN_ALLOWED_RECIPIENTS
 };
+use super::common::utils;
 
-mod handler;
+// TODO: make SMTP handlers registerable by the library user so we can easily
+// add commands and make the server extendable.
+struct SmtpHandler<S: Writer+Reader, E: SmtpServerEventHandler> {
+    pub command_start: String,
+    pub allowed_states: Vec<SmtpTransactionState>,
+    pub callback: fn(&mut SmtpReader<S>, &mut SmtpWriter<S>, &mut SmtpTransactionState, &SmtpServerConfig, &mut E, &str) -> Result<(), ()>
+}
+
+impl<S: Writer+Reader, E: SmtpServerEventHandler> SmtpHandler<S, E> {
+    fn new(command_start: &str, allowed_states: &[SmtpTransactionState], callback: fn(&mut SmtpReader<S>, &mut SmtpWriter<S>, &mut SmtpTransactionState, &SmtpServerConfig, &mut E, &str) -> Result<(), ()>) -> SmtpHandler<S, E> {
+        SmtpHandler {
+            command_start: command_start.into_string(),
+            allowed_states: allowed_states.to_vec(),
+            callback: callback
+        }
+    }
+}
 
 /// Hooks into different places of the SMTP server to allow its customization.
 ///
@@ -153,7 +170,7 @@ pub struct SmtpServer<S: 'static + Writer + Reader, A: Acceptor<S>, E: 'static +
     event_handler: E,
     // Since the handler are function pointers, these are immutable and can safely
     // be stored in an Arc.
-    handlers: Arc<Vec<handler::SmtpHandler<S, E>>>
+    handlers: Arc<Vec<SmtpHandler<S, E>>>
 }
 
 /// Represents an error during creation of an SMTP server.
@@ -190,7 +207,19 @@ impl<S: Writer + Reader + Send, A: Acceptor<S>, E: SmtpServerEventHandler+Clone+
                 acceptor: acceptor,
                 config: Arc::new(config),
                 event_handler: event_handler,
-                handlers: Arc::new(handler::get_handlers::<S, E>())
+                handlers: Arc::new(vec!(
+                    SmtpHandler::new("HELO ", &[Init], handle_command_helo),
+                    SmtpHandler::new("EHLO ", &[Init], handle_command_helo),
+                    SmtpHandler::new("MAIL FROM:", &[Helo], handle_command_mail),
+                    SmtpHandler::new("RCPT TO:", &[Mail, Rcpt], handle_command_rcpt),
+                    SmtpHandler::new("DATA", &[Rcpt], handle_command_data),
+                    SmtpHandler::new("RSET", &[Init, Helo, Mail, Rcpt, Data], handle_command_rset),
+                    SmtpHandler::new("VRFY ", &[Init, Helo, Mail, Rcpt, Data], handle_command_vrfy),
+                    SmtpHandler::new("EXPN ", &[Init, Helo, Mail, Rcpt, Data], handle_command_expn),
+                    SmtpHandler::new("HELP", &[Init, Helo, Mail, Rcpt, Data], handle_command_help),
+                    SmtpHandler::new("NOOP", &[Init, Helo, Mail, Rcpt, Data], handle_command_noop),
+                    SmtpHandler::new("QUIT", &[Init, Helo, Mail, Rcpt, Data], handle_command_quit)
+                ))
             })
         }
 
@@ -249,7 +278,7 @@ impl<E: SmtpServerEventHandler + Clone + Send> SmtpServer<TcpStream, TcpAcceptor
             stream: &mut TcpStream,
             config: Arc<SmtpServerConfig>,
             event_handler: &mut E,
-            handlers: Arc<Vec<handler::SmtpHandler<TcpStream, E>>>) {
+            handlers: Arc<Vec<SmtpHandler<TcpStream, E>>>) {
         // TODO: remove unwrap and handle error
         event_handler.handle_connection(&stream.peer_name().unwrap().ip).unwrap();
 
@@ -274,8 +303,8 @@ impl<E: SmtpServerEventHandler + Clone + Send> SmtpServer<TcpStream, TcpAcceptor
 
     // Get the right handler for a given command line.
     fn get_handler_for_line<'a>(
-            handlers: &'a [handler::SmtpHandler<TcpStream, E>],
-            line: &str) -> Option<&'a handler::SmtpHandler<TcpStream, E>> {
+            handlers: &'a [SmtpHandler<TcpStream, E>],
+            line: &str) -> Option<&'a SmtpHandler<TcpStream, E>> {
         for h in handlers.iter() {
             // Don't check lines shorter than required. This also avoids getting an
             // out of bounds error below.
@@ -295,7 +324,7 @@ impl<E: SmtpServerEventHandler + Clone + Send> SmtpServer<TcpStream, TcpAcceptor
 
     fn get_line_and_handler<'a>(
             input: &mut SmtpReader<TcpStream>,
-            handlers: &'a [handler::SmtpHandler<TcpStream, E>]) -> Result<(String, Option<&'a handler::SmtpHandler<TcpStream, E>>), IoError> {
+            handlers: &'a [SmtpHandler<TcpStream, E>]) -> Result<(String, Option<&'a SmtpHandler<TcpStream, E>>), IoError> {
         match input.read_line() {
             Ok(bytes) => {
                 let line = String::from_utf8_lossy(bytes.as_slice()).into_string();
@@ -309,13 +338,13 @@ impl<E: SmtpServerEventHandler + Clone + Send> SmtpServer<TcpStream, TcpAcceptor
         }
     }
 
-    fn get_reply(
+    fn read_and_handle_command(
             input: &mut SmtpReader<TcpStream>,
             output: &mut SmtpWriter<TcpStream>,
-            handlers: &[handler::SmtpHandler<TcpStream, E>],
+            handlers: &[SmtpHandler<TcpStream, E>],
             state: &mut SmtpTransactionState,
             config: &SmtpServerConfig,
-            event_handler: &mut E) -> Result<String, Option<String>> {
+            event_handler: &mut E) -> Result<(), ()> {
         match SmtpServer::get_line_and_handler(input, handlers) {
             Ok((line, Some(handler))) => {
                 if handler.allowed_states.contains(state) {
@@ -329,22 +358,25 @@ impl<E: SmtpServerEventHandler + Clone + Send> SmtpServer<TcpStream, TcpAcceptor
                         rest
                     )
                 } else {
-                    Ok("503 Bad sequence of commands".into_string())
+                    output.write_line("503 Bad sequence of commands").unwrap();
+                    Ok(())
                 }
             },
             Ok((_, None)) => {
-                Ok("500 Command unrecognized".into_string())
+                output.write_line("500 Command unrecognized").unwrap();
+                Ok(())
             },
             Err(err) => {
                 // If the line was too long, notify the client.
                 match err.kind {
                     InvalidInput => {
                         // TODO: check error desc to make sure this is right
-                        Ok("500 Command line too long, max is 512 bytes".into_string())
+                        output.write_line("500 Command line too long, max is 512 bytes").unwrap();
+                        Ok(())
                     },
                     _ => {
                         // If we get here, the error is unexpected. What to do with it?
-                        Err(Some(err.to_string()))
+                        Err(())
                     }
                 }
             }
@@ -357,27 +389,20 @@ impl<E: SmtpServerEventHandler + Clone + Send> SmtpServer<TcpStream, TcpAcceptor
             output: &mut SmtpWriter<TcpStream>,
             config: Arc<SmtpServerConfig>,
             event_handler: &mut E,
-            handlers: Arc<Vec<handler::SmtpHandler<TcpStream, E>>>) {
+            handlers: Arc<Vec<SmtpHandler<TcpStream, E>>>) {
         // Setup the initial transaction state for this client.
         let mut state = Init;
+
+        // Read and handle commands.
         'main_loop: loop {
-            let reply = SmtpServer::get_reply(
+            SmtpServer::read_and_handle_command(
                 input,
                 output,
                 handlers.as_slice(),
                 &mut state,
                 config.deref(),
                 event_handler
-            );
-
-            match reply {
-                Ok(msg) => {
-                    output.write_line(msg.as_slice()).unwrap();
-                },
-                Err(err) => {
-                    panic!(err);
-                }
-            }
+            ).unwrap();
         }
     }
 }
@@ -399,5 +424,304 @@ fn test_smtp_server_handlers() {
 
 #[test]
 fn test_smtp_server_run() {
+    // fail!();
+}
+
+#[allow(unused_variables)]
+fn handle_command_helo<S: Writer+Reader, E: SmtpServerEventHandler>(
+                        input: &mut SmtpReader<S>,
+                        output: &mut SmtpWriter<S>,
+                        state: &mut SmtpTransactionState,
+                        config: &SmtpServerConfig,
+                        event_handler: &mut E,
+                        line: &str) -> Result<(), ()> {
+    if line.len() == 0 {
+        output.write_line("501 Domain name not provided").unwrap();
+    } else if utils::get_domain_len(line) != line.len() {
+        output.write_line("501 Domain name is invalid").unwrap();
+    } else {
+        match event_handler.handle_domain(line) {
+            Ok(_) => {
+                *state = Helo;
+                output.write_line("250 OK").unwrap();
+            },
+            Err(_) => {
+                output.write_line("550 Domain not taken").unwrap();
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn test_command_helo() {
+    // fail!();
+}
+
+#[allow(unused_variables)]
+fn handle_command_mail<S: Writer+Reader, E: SmtpServerEventHandler>(
+                        input: &mut SmtpReader<S>,
+                        output: &mut SmtpWriter<S>,
+                        state: &mut SmtpTransactionState,
+                        config: &SmtpServerConfig,
+                        event_handler: &mut E,
+                        line: &str) -> Result<(), ()> {
+    if line.len() < 2 || line.char_at(0) != '<' || line.char_at(line.len() - 1) != '>' {
+        output.write_line("501 Email address invalid, must start with < and end with >").unwrap();
+    } else if line == "<>" {
+        match event_handler.handle_sender_address(None) {
+            Ok(_) => {
+                *state = Mail;
+                output.write_line("250 OK").unwrap();
+            },
+            Err(_) => {
+                output.write_line("550 Mailnot available").unwrap();
+            }
+        }
+    } else {
+        let mailbox_res = Mailbox::parse(line.slice(1, line.len() - 1));
+        match mailbox_res {
+            Err(err) => {
+                output.write_line(format!("553 Email address invalid: {}", err).as_slice()).unwrap();
+            },
+            Ok(mailbox) => {
+                match event_handler.handle_sender_address(Some(&mailbox)) {
+                    Ok(_) => {
+                        *state = Mail;
+                        output.write_line("250 OK").unwrap();
+                    },
+                    Err(_) => {
+                        output.write_line("550 Mailnot taken").unwrap();
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn test_command_mail() {
+    // fail!();
+}
+
+#[allow(unused_variables)]
+fn handle_command_rcpt<S: Writer+Reader, E: SmtpServerEventHandler>(
+                        input: &mut SmtpReader<S>,
+                        output: &mut SmtpWriter<S>,
+                        state: &mut SmtpTransactionState,
+                        config: &SmtpServerConfig,
+                        event_handler: &mut E,
+                        line: &str) -> Result<(), ()> {
+    // TODO: check maximum number of recipients? Maybe after the event handler
+    // sends back `Ok(())`?
+    if false {
+        output.write_line("452 Too many recipients").unwrap();
+    } else if line.char_at(0) != '<' || line.char_at(line.len() - 1) != '>' {
+        output.write_line("501 Email address invalid, must start with < and end with >").unwrap();
+    } else {
+        let mailbox_res = Mailbox::parse(line.slice(1, line.len() - 1));
+        match mailbox_res {
+            Err(err) => {
+                output.write_line(format!("553 Email address invalid: {}", err).as_slice()).unwrap();
+            },
+            Ok(mailbox) => {
+                match event_handler.handle_receiver_address(&mailbox) {
+                    Ok(_) => {
+                        *state = Rcpt;
+                        output.write_line("250 OK").unwrap();
+                    },
+                    Err(_) => {
+                        output.write_line("550 Mailnot available").unwrap();
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn test_command_rcpt() {
+    // fail!();
+}
+
+#[allow(unused_variables)]
+fn handle_command_data<S: Writer+Reader, E: SmtpServerEventHandler>(
+                        input: &mut SmtpReader<S>,
+                        output: &mut SmtpWriter<S>,
+                        state: &mut SmtpTransactionState,
+                        config: &SmtpServerConfig,
+                        event_handler: &mut E,
+                        line: &str) -> Result<(), ()> {
+    if line.len() != 0 {
+        output.write_line("501 No arguments allowed").unwrap();
+    } else {
+        output.write_line("354 Start mail input; end with <CRLF>.<CRLF>").unwrap();
+
+        // Inform our event handler that mail data is about to be received.
+        event_handler.handle_body_start().unwrap();
+
+        let mut size = 0;
+        loop {
+            match input.read_line() {
+                Ok(data_line) => {
+                    // Here, we check that we have already got some data, which
+                    // means that we have read a line, which means we have just
+                    // seen `<CRLF>`. And then, we check if the current line
+                    // which we know to end with `<CRLF>` as well contains a
+                    // single dot.
+                    // All in all, this means we check for `<CRLF>.<CRLF>`.
+                    if size != 0 && data_line == &['.' as u8] {
+                        break;
+                    }
+                    // TODO: support transparency. Here or in the reader ?
+
+                    event_handler.handle_body_part(data_line).unwrap();
+
+                    size += data_line.len();
+
+                    if size > config.max_message_size {
+                        // TODO: add an error handler in the event handler?
+                        output.write_line(format!(
+                            "552 Too much mail data, max {} bytes",
+                            config.max_message_size
+                        ).as_slice()).unwrap();
+                        return Ok(());
+                    }
+                },
+                Err(err) => {
+                    return Err(());
+                }
+            }
+        }
+
+        // Inform our event handler that all data has been received.
+        event_handler.handle_body_end().unwrap();
+
+        // We're all good !
+        state.reset();
+        output.write_line("250 OK").unwrap();
+    }
+    Ok(())
+}
+
+#[test]
+fn test_command_data() {
+    // fail!();
+}
+
+#[allow(unused_variables)]
+fn handle_command_rset<S: Writer+Reader, E: SmtpServerEventHandler>(
+                        input: &mut SmtpReader<S>,
+                        output: &mut SmtpWriter<S>,
+                        state: &mut SmtpTransactionState,
+                        config: &SmtpServerConfig,
+                        event_handler: &mut E,
+                        line: &str) -> Result<(), ()> {
+    if line.len() != 0 {
+        output.write_line("501 No arguments allowed").unwrap();
+    } else {
+        state.reset();
+        output.write_line("250 OK").unwrap();
+    }
+    Ok(())
+}
+
+#[test]
+fn test_command_rset() {
+    // fail!();
+}
+
+#[allow(unused_variables)]
+fn handle_command_vrfy<S: Writer+Reader, E: SmtpServerEventHandler>(
+                        input: &mut SmtpReader<S>,
+                        output: &mut SmtpWriter<S>,
+                        state: &mut SmtpTransactionState,
+                        config: &SmtpServerConfig,
+                        event_handler: &mut E,
+                        line: &str) -> Result<(), ()> {
+    output.write_line("252 Cannot VRFY user").unwrap();
+    Ok(())
+}
+
+#[test]
+fn test_command_vrfy() {
+    // fail!();
+}
+
+#[allow(unused_variables)]
+fn handle_command_expn<S: Writer+Reader, E: SmtpServerEventHandler>(
+                        input: &mut SmtpReader<S>,
+                        output: &mut SmtpWriter<S>,
+                        state: &mut SmtpTransactionState,
+                        config: &SmtpServerConfig,
+                        event_handler: &mut E,
+                        line: &str) -> Result<(), ()> {
+    output.write_line("252 Cannot EXPN mailing list").unwrap();
+    Ok(())
+}
+
+#[test]
+fn test_command_expn() {
+    // fail!();
+}
+
+#[allow(unused_variables)]
+fn handle_command_help<S: Writer+Reader, E: SmtpServerEventHandler>(
+                        input: &mut SmtpReader<S>,
+                        output: &mut SmtpWriter<S>,
+                        state: &mut SmtpTransactionState,
+                        config: &SmtpServerConfig,
+                        event_handler: &mut E,
+                        line: &str) -> Result<(), ()> {
+    if line.len() == 0 || line.char_at(0) == ' ' {
+        output.write_line("502 Command not implemented").unwrap();
+    } else {
+        output.write_line("500 Command unrecognized").unwrap();
+    }
+    Ok(())
+}
+
+#[test]
+fn test_command_help() {
+    // fail!();
+}
+
+#[allow(unused_variables)]
+fn handle_command_noop<S: Writer+Reader, E: SmtpServerEventHandler>(
+                        input: &mut SmtpReader<S>,
+                        output: &mut SmtpWriter<S>,
+                        state: &mut SmtpTransactionState,
+                        config: &SmtpServerConfig,
+                        event_handler: &mut E,
+                        line: &str) -> Result<(), ()> {
+    if line.len() == 0 || line.char_at(0) == ' ' {
+        output.write_line("250 OK").unwrap();
+    } else {
+        output.write_line("500 Command unrecognized").unwrap();
+    }
+    Ok(())
+}
+
+#[test]
+fn test_command_noop() {
+    // fail!();
+}
+
+#[allow(unused_variables)]
+fn handle_command_quit<S: Writer+Reader, E: SmtpServerEventHandler>(
+                        input: &mut SmtpReader<S>,
+                        output: &mut SmtpWriter<S>,
+                        state: &mut SmtpTransactionState,
+                        config: &SmtpServerConfig,
+                        event_handler: &mut E,
+                        line: &str) -> Result<(), ()> {
+    output.write_line(format!("221 {}", config.domain).as_slice()).unwrap();
+    Err(())
+}
+
+#[test]
+fn test_command_quit() {
     // fail!();
 }
