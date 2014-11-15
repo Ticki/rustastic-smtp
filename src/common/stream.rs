@@ -42,7 +42,7 @@ fn test_static_vars() {
 /// };
 ///
 /// let mut smtp = SmtpReader::new(
-///     TcpStream::connect("127.0.0.1", 25).unwrap(),
+///     TcpStream::connect("127.0.0.1:25").unwrap(),
 ///     MIN_ALLOWED_LINE_SIZE,
 ///     false
 /// );

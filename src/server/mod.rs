@@ -229,7 +229,7 @@ impl<S: Writer + Reader + Send, A: Acceptor<S>, E: SmtpServerEventHandler+Clone+
 impl<E: SmtpServerEventHandler + Clone + Send> SmtpServer<TcpStream, TcpAcceptor, E> {
     /// Creates a new SMTP server that listens on `0.0.0.0:2525`.
     pub fn new(config: SmtpServerConfig, event_handler: E) -> Result<SmtpServer<TcpStream, TcpAcceptor, E>, SmtpServerError> {
-        match TcpListener::bind(config.ip, config.port) {
+        match TcpListener::bind(format!("{}:{}", config.ip, config.port).as_slice()) {
             Ok(listener) => {
                 if config.debug {
                     println!("rsmtp: info: binding on ip {}", config.ip);
