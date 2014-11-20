@@ -39,11 +39,11 @@ impl SmtpTransactionState {
     /// Reset the state.
     pub fn reset(&mut self) {
         match *self {
-            Init => {
+            SmtpTransactionState::Init => {
                 // Do nothing.
             },
             _ => {
-                *self = Helo;
+                *self = SmtpTransactionState::Helo;
             }
         }
     }

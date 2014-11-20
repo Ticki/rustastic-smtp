@@ -21,7 +21,8 @@ use std::io::{Listener, Acceptor, IoError, Reader, Writer, InvalidInput};
 use super::common::stream::{SmtpReader, SmtpWriter};
 use std::sync::Arc;
 use std::ascii::OwnedAsciiExt;
-use super::common::transaction::{SmtpTransactionState, Init, Helo, Mail, Rcpt, Data};
+use super::common::transaction::SmtpTransactionState;
+use super::common::transaction::SmtpTransactionState::{Init, Helo, Mail, Rcpt, Data};
 use super::common::mailbox::Mailbox;
 use super::common::{
     MIN_ALLOWED_MESSAGE_SIZE,
@@ -197,11 +198,11 @@ impl<S: Writer + Reader + Send, A: Acceptor<S>, E: SmtpServerEventHandler+Clone+
     /// Creates a new SMTP server from an `Acceptor` implementor. Useful for testing.
     fn new_from_acceptor(acceptor: A, config: SmtpServerConfig, event_handler: E) -> Result<SmtpServer<S, A, E>, SmtpServerError> {
         if config.max_message_size < MIN_ALLOWED_MESSAGE_SIZE {
-            Err(MaxMessageSizeTooLow(config.max_message_size))
+            Err(SmtpServerError::MaxMessageSizeTooLow(config.max_message_size))
         } else if config.max_line_size < MIN_ALLOWED_LINE_SIZE {
-            Err(MaxLineSizeTooLow(config.max_line_size))
+            Err(SmtpServerError::MaxLineSizeTooLow(config.max_line_size))
         } else if config.max_recipients < MIN_ALLOWED_RECIPIENTS {
-            Err(MaxRecipientsTooLow(config.max_recipients))
+            Err(SmtpServerError::MaxRecipientsTooLow(config.max_recipients))
         } else {
             Ok(SmtpServer {
                 acceptor: acceptor,
@@ -241,10 +242,10 @@ impl<E: SmtpServerEventHandler + Clone + Send> SmtpServer<TcpStream, TcpAcceptor
                         }
                         SmtpServer::new_from_acceptor(acceptor, config, event_handler)
                     },
-                    Err(err) => Err(ListenFailed(err))
+                    Err(err) => Err(SmtpServerError::ListenFailed(err))
                 }
             },
-            Err(err) => Err(BindFailed(err))
+            Err(err) => Err(SmtpServerError::BindFailed(err))
         }
     }
 

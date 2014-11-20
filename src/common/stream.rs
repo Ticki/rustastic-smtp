@@ -73,17 +73,17 @@ enum CRLFState {
 
 // Find the position of the first `<CRLF>` in a buffer.
 fn position_crlf(buf: &[u8]) -> Option<uint> {
-    let mut state = Cr;
+    let mut state = CRLFState::Cr;
     let mut index = 0;
 
     for byte in buf.iter() {
         match state {
-            Cr => {
+            CRLFState::Cr => {
                 if byte == &13 {
-                    state = Lf;
+                    state = CRLFState::Lf;
                 }
             },
-            Lf => {
+            CRLFState::Lf => {
                 if byte == &10 {
                     // Subtract 1 to account for the \r, seen previously.
                     return Some(index - 1);
