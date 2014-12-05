@@ -18,7 +18,10 @@
 extern crate libc;
 
 use super::common::stream::{InputStream, OutputStream};
-use std::io::net::tcp::TcpStream;
+use std::io::net::tcp::{TcpListener, TcpAcceptor, TcpStream};
+use std::io::net::ip::{SocketAddr, IpAddr, Port};
+use std::io::{Acceptor, Listener, IoResult};
+use std::sync::Arc;
 
 extern {
     pub fn gethostname(name: *mut libc::c_char, size: libc::size_t) -> libc::c_int;
@@ -114,7 +117,7 @@ impl<'a, CT, ST> Command<'a, CT, ST> {
 
 /// An SMTP server, with no commands by default.
 pub struct Server<'a, CT> {
-    hostname: Option<String>,
+    hostname: String,
     max_recipients: uint,
     max_message_size: uint,
     max_command_line_size: uint,
@@ -122,6 +125,18 @@ pub struct Server<'a, CT> {
     commands: Vec<Command<'a, CT, TcpStream>>,
     container: CT
 }
+
+/// An error that occures when a server starts up
+pub enum ServerError {
+    /// The hostname could not be retrieved from the system
+    Hostname,
+    /// Could not bind the socket
+    Bind,
+    /// Could not listen on the socket
+    Listen
+}
+
+pub type ServerResult<T> = Result<T, ServerError>;
 
 // TODO: logging, via a Trait on the container?
 // TODO: fatal error handling
@@ -135,7 +150,7 @@ impl<'a, CT> Server<'a, CT> {
     /// a logger and more.
     pub fn new(container: CT) -> Server<'a, CT> {
         Server {
-            hostname: None,
+            hostname: String::new(),
             max_recipients: 100,
             max_message_size: 65536,
             max_command_line_size: 512,
@@ -146,7 +161,7 @@ impl<'a, CT> Server<'a, CT> {
     }
 
     fn set_hostname(&mut self, hostname: &str) {
-        self.hostname = Some(hostname.into_string());
+        self.hostname = hostname.into_string();
     }
 
     fn set_max_recipients(&mut self, max: uint) {
@@ -180,20 +195,58 @@ impl<'a, CT> Server<'a, CT> {
         self.max_text_line_size += bytes;
     }
 
-    /// Start the SMTP server on the given address.
-    ///
-    /// The address is something like "0.0.0.0:2525".
-    pub fn listen(&mut self, address: &str) {
-        if self.hostname == None {
-            match rust_gethostname() {
-                Ok(s) => {
-                    self.hostname = Some(s);
-                },
-                Err(_) => {
-                    panic!("Could not automatically get system hostname.");
-                }
+    fn get_hostname_from_system(&mut self) -> ServerResult<String> {
+        match rust_gethostname() {
+            Ok(s) => {
+                Ok(s)
+            },
+            Err(_) => {
+                Err(ServerError::Hostname)
             }
         }
-        println!("{} listening on {}", self.hostname, address);
+    }
+
+    fn get_listener_for_address(&mut self, address: SocketAddr) -> ServerResult<TcpListener> {
+        match TcpListener::bind(address) {
+            Ok(listener) => Ok(listener),
+            Err(_) => Err(ServerError::Bind)
+        }
+    }
+
+    fn get_acceptor_for_listener(&mut self, listener: TcpListener) -> ServerResult<TcpAcceptor> {
+        match listener.listen() {
+            Ok(acceptor) => Ok(acceptor),
+            Err(_) => Err(ServerError::Listen)
+        }
+    }
+
+    fn handle_connection(conn: IoResult<TcpStream>) {
+        spawn(proc() {
+            println!("Do some stuff :)");
+        });
+    }
+
+    /// Start the SMTP server on the given address and port.
+    pub fn listen(&mut self, ip: IpAddr, port: Port) -> ServerResult<()> {
+        if self.hostname.len() == 0 {
+            self.hostname = try!(self.get_hostname_from_system());
+        }
+
+        let address = SocketAddr {
+            ip: ip,
+            port: port
+        };
+
+        let listener = try!(self.get_listener_for_address(address));
+
+        let mut acceptor = try!(self.get_acceptor_for_listener(listener));
+
+        println!("Server '{}'' listening on {}...", self.hostname, address);
+
+        for conn in acceptor.incoming() {
+            Server::<CT>::handle_connection(conn);
+        }
+
+        Ok(())
     }
 }
