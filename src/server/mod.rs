@@ -136,6 +136,7 @@ pub enum ServerError {
     Listen
 }
 
+/// Tells whether an error occured during server setup.
 pub type ServerResult<T> = Result<T, ServerError>;
 
 // TODO: logging, via a Trait on the container?

@@ -14,7 +14,7 @@ Here's a public roadmap: https://trello.com/b/nC5JR22d/rsmtp
 
 # Example
 
-To help you get started and showcase `rsmtp` in action, we have built an [example SMTP server](https://github.com/conradkleinespel/rustastic-smtp-test-server/blob/master/src/main.rs).
+To help you get started and showcase `rsmtp` in action, we have built an [example SMTP server](https://github.com/conradkleinespel/rustastic-smtp-test-server).
 
 # Documentation
 
