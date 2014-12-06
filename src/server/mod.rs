@@ -23,6 +23,9 @@ use std::io::net::ip::{SocketAddr, IpAddr, Port};
 use std::io::{Acceptor, Listener, IoResult};
 use std::sync::Arc;
 
+/// Core SMTP commands
+pub mod commands;
+
 extern {
     pub fn gethostname(name: *mut libc::c_char, size: libc::size_t) -> libc::c_int;
 }
@@ -63,18 +66,25 @@ fn rust_gethostname() -> Result<String, ()> {
 }
 
 /// Gives access to the next middleware for a command.
-pub struct Next<'a, CT, ST> {
-    middleware: Middleware<'a, CT, ST>,
-    next: Box<Option<Next<'a, CT, ST>>>
+pub struct Next<CT, ST> {
+    middleware: Middleware<CT, ST>,
+    next: Box<Option<Next<CT, ST>>>
 }
 
-impl<'a, CT, ST> Next<'a, CT, ST> {
+impl<CT, ST> Clone for Next<CT, ST> {
+    fn clone(&self) -> Next<CT, ST> {
+        Next {
+            middleware: self.middleware,
+            next: box() (*self.next.clone())
+        }
+    }
+}
+
+impl<CT, ST> Next<CT, ST> {
     /// Call a command middleware.
     pub fn call(&mut self, container: &mut CT, i: &mut InputStream<ST>, o: &mut OutputStream<ST>, l: &str) {
         let opt = match *self.next {
-            Some(ref mut callback) => {
-                Some(callback)
-            },
+            Some(ref next) => Some(next.clone()),
             None => None
         };
         (self.middleware)(container, i, o, l, opt);
@@ -82,32 +92,41 @@ impl<'a, CT, ST> Next<'a, CT, ST> {
 }
 
 /// A command middleware callback.
-pub type Middleware<'a, CT, ST> = |
+pub type Middleware<CT, ST> = fn(
     &mut CT,
     &mut InputStream<ST>,
     &mut OutputStream<ST>,
     &str,
-    Option<&mut Next<'a, CT, ST>>
-|: 'a -> ();
+    Option<Next<CT, ST>>
+) -> ();
 
 /// An email server command.
 ///
 /// It is defined by the string you find at the start of the command, for
 /// example "MAIL FROM:" or "EHLO ", as well as a bunch of middleware parts
 /// that are executed sequentially until one says to stop.
-pub struct Command<'a, CT, ST> {
+#[deriving(Clone)]
+pub struct Command<CT, ST> {
     start: Option<String>,
-    middleware: Vec<Next<'a, CT, ST>>,
+    middleware: Vec<Next<CT, ST>>,
 }
 
-impl<'a, CT, ST> Command<'a, CT, ST> {
+impl<CT, ST> Command<CT, ST> {
+    /// Creates a new command
+    pub fn new() -> Command<CT, ST> {
+        Command {
+            start: None,
+            middleware: Vec::new()
+        }
+    }
+
     /// Describes the start of the command line for this command.
     pub fn starts_with(&mut self, start: &str) {
         self.start = Some(start.into_string());
     }
 
     /// Add a middleware to call for this command.
-    pub fn middleware(&mut self, middleware: Middleware<'a, CT, ST>) {
+    pub fn middleware(&mut self, middleware: Middleware<CT, ST>) {
         self.middleware.push(Next {
             middleware: middleware,
             next: box None
@@ -116,13 +135,13 @@ impl<'a, CT, ST> Command<'a, CT, ST> {
 }
 
 /// An SMTP server, with no commands by default.
-pub struct Server<'a, CT> {
+pub struct Server<CT> {
     hostname: String,
     max_recipients: uint,
     max_message_size: uint,
     max_command_line_size: uint,
     max_text_line_size: uint,
-    commands: Vec<Command<'a, CT, TcpStream>>,
+    commands: Arc<Vec<Command<CT, TcpStream>>>,
     container: CT
 }
 
@@ -143,20 +162,20 @@ pub type ServerResult<T> = Result<T, ServerError>;
 // TODO: fatal error handling
 // TODO: actual TCP listening and command handling
 
-impl<'a, CT> Server<'a, CT> {
+impl<CT: Send + Clone> Server<CT> {
     /// Creates a new SMTP server.
     ///
     /// The container can be of any type and can be used to get access to a
     /// bunch of things inside your commands, like database connections,
     /// a logger and more.
-    pub fn new(container: CT) -> Server<'a, CT> {
+    pub fn new(container: CT) -> Server<CT> {
         Server {
             hostname: String::new(),
             max_recipients: 100,
             max_message_size: 65536,
             max_command_line_size: 512,
             max_text_line_size: 1000,
-            commands: Vec::with_capacity(16),
+            commands: Arc::new(Vec::with_capacity(16)),
             container: container
         }
     }
@@ -180,12 +199,15 @@ impl<'a, CT> Server<'a, CT> {
     }
 
     /// Adds a command to the server.
-    pub fn add_command(&mut self, callback: |&mut Command<CT, TcpStream>| -> ()) {
-        let mut command = Command {
-            start: None,
-            middleware: Vec::new(),
-        };
-        callback(&mut command);
+    pub fn add_command(&mut self, command: Command<CT, TcpStream>) {
+        // TODO: Is `make_unique` OK here? I think yes, since the server
+        // is setup in its own thread and commands are only added before
+        // starting the server. This means `make_unique` should never clone
+        // the inner data, but instead always return a a reference to the
+        // original one. If it didn't, we might add the new command on a
+        // different vector from the one that the server has a reference too.
+        // Is that right ?
+        self.commands.make_unique().push(command);
     }
 
     fn increase_max_command_line_size(&mut self, bytes: uint) {
@@ -221,9 +243,40 @@ impl<'a, CT> Server<'a, CT> {
         }
     }
 
-    fn handle_connection(conn: IoResult<TcpStream>) {
+    fn handle_commands(input: &mut InputStream<TcpStream>, output: &mut OutputStream<TcpStream>, container: &mut CT, commands: &[Command<CT, TcpStream>]) {
+        loop {
+            match input.read_line() {
+                Ok(buffer) => {
+                    let line = String::from_utf8_lossy(buffer);
+                    println!("line: {}", line);
+                    for command in commands.iter() {
+                        println!("{}", command.start);
+                    }
+                },
+                Err(err) => {
+                    panic!("{}", err);
+                }
+            }
+            // check if it exists
+                // yes: do each middleware
+                // no: not implemented error message
+        }
+    }
+
+    fn handle_connection(&self, stream: IoResult<TcpStream>) {
+        let mut container = self.container.clone();
+        let commands = self.commands.clone();
         spawn(proc() {
-            println!("Do some stuff :)");
+            let stream = stream.unwrap();
+            let mut input = InputStream::new(stream.clone(), 1000, false);
+            let mut output = OutputStream::new(stream.clone(), false);
+
+            Server::<CT>::handle_commands(
+                &mut input,
+                &mut output,
+                &mut container,
+                (*commands.deref()).as_slice()
+            );
         });
     }
 
@@ -245,7 +298,7 @@ impl<'a, CT> Server<'a, CT> {
         println!("Server '{}'' listening on {}...", self.hostname, address);
 
         for conn in acceptor.incoming() {
-            Server::<CT>::handle_connection(conn);
+            self.handle_connection(conn);
         }
 
         Ok(())
