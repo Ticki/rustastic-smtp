@@ -14,99 +14,24 @@
 
 //! Utility functions used in SMTP clients and SMTP servers.
 
-/// Returns a completely unescaped version of a quoted string.
-///
-/// This is useful for showing the email to a human, as it is easier to read.
-pub fn unescape_quoted_string(s: &str) -> String {
-    let mut i = 1u; // start after the opening quote
-    let mut out = String::with_capacity(s.len());
-
-    // don't go until the end, since the last char is the closing quote
-    while i < s.len() - 1 {
-        if is_atext(s.char_at(i)) || is_qtext_smtp(s.char_at(i)) {
-            out.push(s.char_at(i));
-            i += 1;
-        } else {
-            out.push(s.char_at(i + 1));
-            i += 2;
-        }
-    }
-
-    out
-}
-
-#[test]
-fn test_unescape_quoted_string() {
-    assert_eq!("b{}\"la.bla", unescape_quoted_string("\"b{}\\\"la\\.\\bla\"").as_slice());
-    assert_eq!("", unescape_quoted_string("\"\"").as_slice());
-    assert_eq!("a\\", unescape_quoted_string("\"a\\\\\"").as_slice());
-}
-
-/// Returns a simplified version of a quoted string. This can be another
-/// quoted string or a dot string.
-///
-/// This is useful for showing the email to a human, as it is easier to read.
-pub fn simplify_quoted_string(s: &str) -> String {
-    let mut out = unescape_quoted_string(s);
-
-    // If we have a valid dot-string, return that.
-    if get_dot_string_len(out.as_slice()) == out.len() {
-        return out;
-    }
-
-    // If we don't have a dot-string, remove useless escape sequences.
-    out = String::with_capacity(s.len());
-    out.push('"');
-    let mut i = 1u; // Start after the opening quote.
-    while i < s.len() - 1 { // End before the closing quote.
-        // If we have a regular char, add it.
-        if is_qtext_smtp(s.char_at(i)) {
-            out.push(s.char_at(i));
-            i += 1;
-
-        // If we have an escape sequence, check if it is useful or not.
-        } else {
-            if s.char_at(i + 1) == '"' || s.char_at(i + 1) == '\\' {
-                out.push(s.char_at(i));
-                out.push(s.char_at(i + 1));
-                i += 2;
-            } else {
-                out.push(s.char_at(i + 1));
-                i += 2;
-            }
-        }
-    }
-    out.push('"');
-
-    out
-}
-
-#[test]
-fn test_simplify_quoted_string() {
-    assert_eq!("\"b{}\\\"la.bla\"", simplify_quoted_string("\"b{}\\\"la\\.\\bla\"").as_slice());
-    assert_eq!("", simplify_quoted_string("\"\"").as_slice());
-    assert_eq!("\"a\\\\\"", simplify_quoted_string("\"a\\\\\"").as_slice());
-    assert_eq!("a{", simplify_quoted_string("\"a\\{\"").as_slice());
-}
+use std::io::net::ip::IpAddr;
+use std::str::FromStr;
 
 /// Returns the length of the longest subdomain found at the beginning
 /// of the passed string.
 ///
 /// A subdomain is as described
 /// [in RFC 5321](http://tools.ietf.org/html/rfc5321#section-4.1.2).
-pub fn get_subdomain_len(s: &str) -> uint {
+pub fn get_subdomain(s: &str) -> Option<&str> {
     let mut i = 0u;
-    let mut confirmed_min = 0u;
-    if s.len() == 0 {
-        return 0
-    }
-    if is_alnum(s.char_at(0)) {
+    let mut len = 0u;
+    if s.len() > 0 && is_alnum(s.char_at(0)) {
         i += 1;
-        confirmed_min = i;
+        len = i;
         while i < s.len() {
             if is_alnum(s.char_at(i)) {
                 i += 1;
-                confirmed_min = i;
+                len = i;
             } else if s.char_at(i) == '-' {
                 while i < s.len() && s.char_at(i) == '-' {
                     i += 1;
@@ -116,22 +41,25 @@ pub fn get_subdomain_len(s: &str) -> uint {
             }
         }
     }
-    confirmed_min
+    match len {
+        0 => None,
+        _ => Some(s.slice_to(len))
+    }
 }
 
 #[test]
-fn test_get_subdomain_len() {
+fn test_get_subdomain() {
     // Allow alnum and dashes in the middle, no points.
-    assert_eq!(11, get_subdomain_len("helZo-4-you&&&"));
-    assert_eq!(11, get_subdomain_len("hePRo-4-you.abc"));
+    assert_eq!(Some("helZo-4-you"), get_subdomain("helZo-4-you&&&"));
+    assert_eq!(Some("hePRo-4-you"), get_subdomain("hePRo-4-you.abc"));
 
     // Test with no content at the end.
-    assert_eq!(10, get_subdomain_len("5---a-U-65"));
-    assert_eq!(0, get_subdomain_len(""));
+    assert_eq!(Some("5---a-U-65"), get_subdomain("5---a-U-65"));
+    assert_eq!(None, get_subdomain(""));
 
     // Disallow dash at the end.
-    assert_eq!(5, get_subdomain_len("heS1o-&&&"));
-    assert_eq!(0, get_subdomain_len("-hello-world"));
+    assert_eq!(Some("heS1o"), get_subdomain("heS1o-&&&"));
+    assert_eq!(None, get_subdomain("-hello-world"));
 }
 
 /// Returns the length of the longest domain found at the beginning of
@@ -139,43 +67,46 @@ fn test_get_subdomain_len() {
 ///
 /// A domain is as described
 /// [in RFC 5321](http://tools.ietf.org/html/rfc5321#section-4.1.2).
-pub fn get_domain_len(s: &str) -> uint {
-    // We don't need to check if s.len() == 0 since get_subdomain_len(s)
-    // already does it.
-    let mut confirmed_min = get_subdomain_len(s);
-    if confirmed_min > 0 {
-        while confirmed_min < s.len() && s.char_at(confirmed_min) == '.' {
-            let len = get_subdomain_len(s.slice_from(confirmed_min + 1));
-            if len > 0 {
-                confirmed_min += 1 + len;
-            } else {
-                break;
+pub fn get_domain(s: &str) -> Option<&str> {
+    match get_subdomain(s) {
+        Some(sd1) => {
+            let mut len = sd1.len();
+            while len < s.len() && s.char_at(len) == '.' {
+                match get_subdomain(s.slice_from(len + 1)) {
+                    Some(sdx) => {
+                        len += 1 + sdx.len();
+                    },
+                    None => {
+                        break;
+                    }
+                }
             }
-        }
+            Some(s.slice_to(len))
+        },
+        None => None
     }
-    confirmed_min
 }
 
 #[test]
-fn test_get_domain_len() {
+fn test_get_domain() {
     // Invalid domain.
-    assert_eq!(0, get_domain_len(".hello"));
-    assert_eq!(0, get_domain_len(""));
-    assert_eq!(0, get_domain_len("----"));
+    assert_eq!(None, get_domain(".hello"));
+    assert_eq!(None, get_domain(""));
+    assert_eq!(None, get_domain("----"));
 
     // Valid domains with dots and dashes.
-    assert_eq!(18, get_domain_len("hello-rust.is.N1C3"));
-    assert_eq!(18, get_domain_len("hello-rust.is.N1C3."));
-    assert_eq!(18, get_domain_len("hello-rust.is.N1C3-"));
-    assert_eq!(18, get_domain_len("hello-rust.is.N1C3-."));
-    assert_eq!(18, get_domain_len("hello-rust.is.N1C3-&"));
-    assert_eq!(18, get_domain_len("hello-rust.is.N1C3.&"));
+    assert_eq!(Some("hello-rust.is.N1C3"), get_domain("hello-rust.is.N1C3"));
+    assert_eq!(Some("hello-rust.is.N1C3"), get_domain("hello-rust.is.N1C3."));
+    assert_eq!(Some("hello-rust.is.N1C3"), get_domain("hello-rust.is.N1C3-"));
+    assert_eq!(Some("hello-rust.is.N1C3"), get_domain("hello-rust.is.N1C3-."));
+    assert_eq!(Some("hello-rust.is.N1C3"), get_domain("hello-rust.is.N1C3-&"));
+    assert_eq!(Some("hello-rust.is.N1C3"), get_domain("hello-rust.is.N1C3.&"));
 
     // Valid domains without dashes.
-    assert_eq!(9, get_domain_len("hello.bla."));
+    assert_eq!(Some("hello.bla"), get_domain("hello.bla."));
 
     // Valid domains without dots.
-    assert_eq!(9, get_domain_len("hello-bla."));
+    assert_eq!(Some("hello-bla"), get_domain("hello-bla."));
 }
 
 /// Returns the length of the longest atom found at the beginning of
@@ -183,7 +114,7 @@ fn test_get_domain_len() {
 ///
 /// An atom is as described
 /// [in RFC 5321](http://tools.ietf.org/html/rfc5321#section-4.1.2).
-pub fn get_atom_len(s: &str) -> uint {
+pub fn get_atom(s: &str) -> Option<&str> {
     let mut len = 0u;
     while len < s.len() {
         if is_atext(s.char_at(len)) {
@@ -192,15 +123,18 @@ pub fn get_atom_len(s: &str) -> uint {
             break;
         }
     }
-    len
+    match len {
+        0 => None,
+        _ => Some(s.slice_to(len))
+    }
 }
 
 #[test]
-fn test_get_atom_len() {
-    assert_eq!(0, get_atom_len(" ---"));
-    assert_eq!(4, get_atom_len("!a{`\\"));
-    assert_eq!(4, get_atom_len("!a{`"));
-    assert_eq!(0, get_atom_len(""));
+fn test_get_atom() {
+    assert_eq!(None, get_atom(" ---"));
+    assert_eq!(Some("!a{`"), get_atom("!a{`\\"));
+    assert_eq!(Some("!a{`"), get_atom("!a{`"));
+    assert_eq!(None, get_atom(""));
 }
 
 /// Returns the length of the longest dot-string found at the beginning
@@ -208,30 +142,37 @@ fn test_get_atom_len() {
 ///
 /// A dot-string is as described
 /// [in RFC 5321](http://tools.ietf.org/html/rfc5321#section-4.1.2).
-pub fn get_dot_string_len(s: &str) -> uint {
-    // We don't need to check if s.len() == 0 since get_atom_len(s)
-    // already does it.
-    let mut confirmed_min = get_atom_len(s);
-    if confirmed_min > 0 {
-        while confirmed_min < s.len() && s.char_at(confirmed_min) == '.' {
-            let len = get_atom_len(s.slice_from(confirmed_min + 1));
-            if len > 0 {
-                confirmed_min += 1 + len;
-            } else {
-                break;
+pub fn get_dot_string(s: &str) -> Option<&str> {
+    let mut len = 0u;
+
+    match get_atom(s) {
+        Some(a1) => {
+            len += a1.len();
+            while len < s.len() && s.char_at(len) == '.' {
+                match get_atom(s.slice_from(len + 1)) {
+                    Some(a) => {
+                        len += 1 + a.len();
+                    },
+                    None => {
+                        break;
+                    }
+                }
             }
+            Some(s.slice_to(len))
+        },
+        None => {
+            None
         }
     }
-    confirmed_min
 }
 
 #[test]
-fn test_get_dot_string_len() {
-    assert_eq!(0, get_dot_string_len(""));
-    assert_eq!(0, get_dot_string_len(" fwefwe"));
-    assert_eq!(10, get_dot_string_len("-`-.bla.ok "));
-    assert_eq!(10, get_dot_string_len("-`-.bla.ok"));
-    assert_eq!(10, get_dot_string_len("-`-.bla.ok."));
+fn test_get_dot_string() {
+    assert_eq!(None, get_dot_string(""));
+    assert_eq!(None, get_dot_string(" fwefwe"));
+    assert_eq!(Some("-`-.bla.ok"), get_dot_string("-`-.bla.ok "));
+    assert_eq!(Some("-`-.bla.ok"), get_dot_string("-`-.bla.ok"));
+    assert_eq!(Some("-`-.bla.ok"), get_dot_string("-`-.bla.ok."));
 }
 
 /// Checks whether a character is valid `atext` as described
@@ -336,47 +277,49 @@ fn test_is_alnum() {
 ///
 /// A quoted-string is as described
 /// [in RFC 5321](http://tools.ietf.org/html/rfc5321#section-4.1.2).
-pub fn get_quoted_string_len(s: &str) -> uint {
+pub fn get_quoted_string(s: &str) -> Option<&str> {
+    let sl = s.len();
     // We need at least "".
-    if s.len() < 2 || s.char_at(0) != '"' {
-        return 0
-    }
-    // Length of 1 since we have the opening quote.
-    let mut len = 1u;
-    loop {
-        // Regular text.
-        if len < s.len() && is_qtext_smtp(s.char_at(len)) {
-            len += 1;
-        // Escaped text.
-        } else if len + 1 < s.len() &&
-            is_quoted_pair_smtp(s.char_at(len), s.char_at(len + 1)) {
-            len += 2;
-        } else {
-            break;
+    if sl >= 2 && s.char_at(0) == '"' {
+        // Length of 1 since we have the opening quote.
+        let mut len = 1u;
+        loop {
+            // Regular text.
+            if len < sl && is_qtext_smtp(s.char_at(len)) {
+                len += 1;
+            // Escaped text.
+            } else if len + 1 < sl &&
+                is_quoted_pair_smtp(s.char_at(len), s.char_at(len + 1)) {
+                len += 2;
+            } else {
+                break;
+            }
         }
-    }
-    if len < s.len() && s.char_at(len) == '"' {
-        len + 1
+        if len < sl && s.char_at(len) == '"' {
+            Some(s.slice_to(len + 1))
+        } else {
+            None
+        }
     } else {
-        0
+        None
     }
 }
 
 #[test]
-fn test_get_quoted_string_len() {
+fn test_get_quoted_string() {
     // Invalid.
-    assert_eq!(0, get_quoted_string_len(""));
-    assert_eq!(0, get_quoted_string_len(" "));
-    assert_eq!(0, get_quoted_string_len("  "));
-    assert_eq!(0, get_quoted_string_len(" \""));
-    assert_eq!(0, get_quoted_string_len(" \" \""));
-    assert_eq!(0, get_quoted_string_len("\""));
-    assert_eq!(0, get_quoted_string_len("\"Rust{\\\\\\\"\\a}\\stic"));
+    assert_eq!(None, get_quoted_string(""));
+    assert_eq!(None, get_quoted_string(" "));
+    assert_eq!(None, get_quoted_string("  "));
+    assert_eq!(None, get_quoted_string(" \""));
+    assert_eq!(None, get_quoted_string(" \" \""));
+    assert_eq!(None, get_quoted_string("\""));
+    assert_eq!(None, get_quoted_string("\"Rust{\\\\\\\"\\a}\\stic"));
 
     // Valid.
-    assert_eq!(2, get_quoted_string_len("\"\""));
-    assert_eq!(19, get_quoted_string_len("\"Rust{\\\\\\\"\\a}\\stic\""));
-    assert_eq!(19, get_quoted_string_len("\"Rust{\\\\\\\"\\a}\\stic\" "));
+    assert_eq!(Some("\"\""), get_quoted_string("\"\""));
+    assert_eq!(Some("\"Rust{\\\\\\\"\\a}\\stic\""), get_quoted_string("\"Rust{\\\\\\\"\\a}\\stic\""));
+    assert_eq!(Some("\"Rust{\\\\\\\"\\a}\\stic\""), get_quoted_string("\"Rust{\\\\\\\"\\a}\\stic\" "));
 }
 
 /// Checks whether a character is valid `qtextSMTP` as described
@@ -426,28 +369,27 @@ fn test_is_quoted_pair_smtp() {
 ///
 /// An at-domain is as described
 /// [in RFC 5321](http://tools.ietf.org/html/rfc5321#section-4.1.2).
-pub fn get_at_domain_len(s: &str) -> uint {
-    if s.len() < 1 || s.char_at(0) != '@' {
-        return 0
-    }
-    let len = get_domain_len(s.slice_from(1));
-
-    // If we found a valid domain, we return its length plus 1 for the @.
-    if len > 0 {
-        len + 1
+pub fn get_at_domain(s: &str) -> Option<&str> {
+    if s.len() > 1 && s.char_at(0) == '@' {
+        match get_domain(s.slice_from(1)) {
+            Some(d) => {
+                Some(s.slice_to(1 + d.len()))
+            },
+            None => None
+        }
     } else {
-        0
+        None
     }
 }
 
 #[test]
-fn test_get_at_domain_len() {
-    assert_eq!(0, get_at_domain_len(""));
-    assert_eq!(0, get_at_domain_len("@"));
-    assert_eq!(0, get_at_domain_len("@@"));
-    assert_eq!(5, get_at_domain_len("@rust"));
-    assert_eq!(5, get_at_domain_len("@rust{}"));
-    assert_eq!(14, get_at_domain_len("@rustastic.org"));
+fn test_get_at_domain() {
+    assert_eq!(None, get_at_domain(""));
+    assert_eq!(None, get_at_domain("@"));
+    assert_eq!(None, get_at_domain("@@"));
+    assert_eq!(Some("@rust"), get_at_domain("@rust"));
+    assert_eq!(Some("@rust"), get_at_domain("@rust{}"));
+    assert_eq!(Some("@rustastic.org"), get_at_domain("@rustastic.org"));
 }
 
 /// Returns the length of the source routes found at the beginning of
@@ -455,103 +397,154 @@ fn test_get_at_domain_len() {
 ///
 /// Source routes are as described
 /// [in RFC 5321](http://tools.ietf.org/html/rfc5321#section-4.1.2).
-pub fn get_source_route_len(s: &str) -> uint {
+pub fn get_source_route(s: &str) -> Option<&str> {
     // The total length we have found for source routes.
     let mut len = 0u;
 
-    // The length of the source route currently being checked in loop.
-    let mut curr_len;
-
     loop {
         // Get the current source route.
-        curr_len = get_at_domain_len(s.slice_from(len));
-        if curr_len > 0 {
-            len += curr_len;
-            // Check if another source route is coming, if not, stop looking
-            // for more source routes.
-            if len < s.len() && s.char_at(len) == ',' {
-                len += 1;
-            } else {
+        match get_at_domain(s.slice_from(len)) {
+            Some(ad) => {
+                len += ad.len();
+                // Check if another source route is coming, if not, stop looking
+                // for more source routes.
+                if len < s.len() && s.char_at(len) == ',' {
+                    len += 1;
+                } else {
+                    break;
+                }
+            },
+            None => {
                 break;
             }
-        } else {
-            break;
         }
     }
 
     // Expect the source route declaration to end with ':'.
     if len < s.len() && s.char_at(len) == ':' {
-        len + 1
+        Some(s.slice_to(len + 1))
     } else {
-        0
+        None
     }
 }
 
 #[test]
-fn test_get_source_route_len() {
+fn test_get_source_route() {
     // Invalid.
-    assert_eq!(0, get_source_route_len(""));
-    assert_eq!(0, get_source_route_len("@rust,"));
-    assert_eq!(0, get_source_route_len("@rust"));
-    assert_eq!(0, get_source_route_len("@,@:"));
-    assert_eq!(0, get_source_route_len("@rust,@troll"));
-    assert_eq!(0, get_source_route_len("@rust,@tro{ll:"));
+    assert_eq!(None, get_source_route(""));
+    assert_eq!(None, get_source_route("@rust,"));
+    assert_eq!(None, get_source_route("@rust"));
+    assert_eq!(None, get_source_route("@,@:"));
+    assert_eq!(None, get_source_route("@rust,@troll"));
+    assert_eq!(None, get_source_route("@rust,@tro{ll:"));
 
     // Valid.
-    assert_eq!(13, get_source_route_len("@rust,@troll:"));
-    assert_eq!(16, get_source_route_len("@rust.is,@troll:"));
+    assert_eq!(Some("@rust,@troll:"), get_source_route("@rust,@troll:"));
+    assert_eq!(Some("@rust.is,@troll:"), get_source_route("@rust.is,@troll:"));
 }
 
 /// If the string starts with an ipv6 as present in email addresses, ie `[Ipv6:...]`, get its
 /// length. Else return `0`.
-pub fn get_possible_ipv6_len(ip: &str) -> uint {
+fn get_possible_mailbox_ipv6(ip: &str) -> Option<&str> {
     if ip.len() < 7 || ip.slice_to(6) != "[Ipv6:" {
-        0
+        None
     } else {
         let mut i = 6u;
         while i < ip.len() && ip.char_at(i) != ']' {
             i += 1;
         }
         if i < ip.len() && ip.char_at(i) == ']' {
-            i + 1
+            Some(ip.slice_to(i + 1))
         } else {
-            0
+            None
         }
     }
 }
 
 #[test]
-fn test_get_possible_ipv6_len() {
-    assert_eq!(10, get_possible_ipv6_len("[Ipv6:434]"));
-    assert_eq!(10, get_possible_ipv6_len("[Ipv6:434][]"));
-    assert_eq!(0, get_possible_ipv6_len("[Ipv6:434"));
-    assert_eq!(7, get_possible_ipv6_len("[Ipv6:]"));
-    assert_eq!(7, get_possible_ipv6_len("[Ipv6:]a"));
-    assert_eq!(0, get_possible_ipv6_len("[Ipv"));
+fn test_get_possible_mailbox_ipv6() {
+    assert_eq!(Some("[Ipv6:434]"), get_possible_mailbox_ipv6("[Ipv6:434]"));
+    assert_eq!(Some("[Ipv6:434]"), get_possible_mailbox_ipv6("[Ipv6:434][]"));
+    assert_eq!(Some("[Ipv6:]"), get_possible_mailbox_ipv6("[Ipv6:]"));
+    assert_eq!(Some("[Ipv6:]"), get_possible_mailbox_ipv6("[Ipv6:]a"));
+    assert_eq!(Some("[Ipv6:::1]"), get_possible_mailbox_ipv6("[Ipv6:::1]"));
+    assert_eq!(None, get_possible_mailbox_ipv6("[Ipv6:434"));
+    assert_eq!(None, get_possible_mailbox_ipv6("[Ipv"));
 }
 
 /// If the string starts with an ipv4 as present in email addresses, ie `[...]`, get its
 /// length. Else return `0`.
-pub fn get_possible_ipv4_len(ip: &str) -> uint {
+fn get_possible_mailbox_ipv4(ip: &str) -> Option<&str> {
     if ip.len() < 3 || ip.char_at(0) != '[' || ip.char_at(1) > '9' || ip.char_at(1) < '0' {
-        0
+        None
     } else {
         let mut i = 1u;
         while i < ip.len() && ip.char_at(i) != ']' {
             i += 1;
         }
         if i < ip.len() && ip.char_at(i) == ']' {
-            i + 1
+            Some(ip.slice_to(i + 1))
         } else {
-            0
+            None
         }
     }
 }
 
 #[test]
-fn test_get_possible_ipv4_len() {
-    assert_eq!(0, get_possible_ipv4_len("[Ipv6:]"));
-    assert_eq!(3, get_possible_ipv4_len("[1]"));
-    assert_eq!(3, get_possible_ipv4_len("[1]1"));
-    assert_eq!(0, get_possible_ipv4_len("[]"));
+fn test_get_possible_mailbox_ipv4() {
+    assert_eq!(Some("[1]"), get_possible_mailbox_ipv4("[1]"));
+    assert_eq!(Some("[1]"), get_possible_mailbox_ipv4("[1]1"));
+    assert_eq!(None, get_possible_mailbox_ipv4("[Ipv6:]"));
+    assert_eq!(None, get_possible_mailbox_ipv4("[]"));
+}
+
+/// Get the IPv4 or IPv6 as used in the foreign part of an email address.
+pub fn get_mailbox_ip(s: &str) -> Option<(&str, IpAddr)> {
+    get_possible_mailbox_ipv4(s).and_then(|ip| {
+        // The IP without prefix / suffix.
+        let stripped_ip = s.slice(
+            // Start after the prefix "[" as in "[127.0.0.1]"
+            1,
+            // Go until before the suffix "]".
+            ip.len() - 1
+        );
+
+        // Try to parse the IP address.
+        FromStr::from_str(stripped_ip).map(|addr| (ip, addr))
+    }).or(get_possible_mailbox_ipv6(s).and_then(|ip| {
+        // The IP without prefix / suffix.
+        let stripped_ip = s.slice(
+            // Start after the prefix "[Ipv6:" as in "[Ipv6:::1]"
+            6,
+            // Go until before the suffix "]".
+            ip.len() - 1
+        );
+
+        // Try to parse the IP address.
+        FromStr::from_str(stripped_ip).map(|addr| (ip, addr))
+    }))
+}
+
+#[test]
+fn test_get_possible_mailbox() {
+    // IPv6
+    assert_eq!(
+        Some(("[Ipv6:::1]", IpAddr::Ipv6Addr(0, 0, 0, 0, 0, 0, 0, 1))),
+        get_mailbox_ip("[Ipv6:::1]")
+    );
+
+    // IPv4
+    assert_eq!(
+        Some(("[127.0.0.1]", IpAddr::Ipv4Addr(127, 0, 0, 1))),
+        get_mailbox_ip("[127.0.0.1]")
+    );
+
+    // Missing end bracket.
+    assert_eq!(None, get_mailbox_ip("[Ipv6:434"));
+
+    // No version.
+    assert_eq!(None, get_mailbox_ip("[Ipv"));
+
+    // Nothing in there.
+    assert_eq!(None, get_mailbox_ip("[]"));
 }
