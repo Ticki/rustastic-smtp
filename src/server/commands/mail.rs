@@ -18,7 +18,7 @@ use super::super::super::common::stream::InputStream;
 use super::super::super::common::stream::OutputStream;
 use super::super::NextMiddleware;
 use super::super::Command;
-use super::Stateful;
+use super::HeloSeen;
 
 type Next<CT> = Option<NextMiddleware<CT, TcpStream>>;
 type Input = InputStream<TcpStream>;
@@ -33,10 +33,10 @@ pub trait MailHandler {
     fn handle_sender_address(&mut self, mailbox: Option<Mailbox>) -> Result<(), ()>;
 }
 
-fn check_state<CT: Stateful>(container: &mut CT, input: &mut Input, output: &mut Output, line: &str, next: Next<CT>) {
-    match container.state().get_bool_default("has_seen_ehlo", false) {
+fn check_state<CT: HeloSeen>(container: &mut CT, input: &mut Input, output: &mut Output, line: &str, next: Next<CT>) {
+    match container.helo_seen() {
         false => {
-            output.write_line("503 Bad sequence of commands").unwrap();
+            output.write_line("503 Bad sequence of commands, HELO/EHLO first").unwrap();
         },
         true => {
             next.unwrap().call(container, input, output, line);
@@ -92,7 +92,7 @@ fn handle_sender<CT: MailHandler>(container: &mut CT, input: &mut Input, output:
 }
 
 /// Returns the MAIL command
-pub fn get<CT: Stateful + MailHandler + Clone + Send>() -> Command<CT, TcpStream> {
+pub fn get_mail_command<CT: HeloSeen + MailHandler + Clone + Send>() -> Command<CT, TcpStream> {
     let mut command = Command::new();
     command.starts_with("MAIL FROM:");
     command.middleware(check_state);
