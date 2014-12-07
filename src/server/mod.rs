@@ -22,6 +22,7 @@ use std::io::net::tcp::{TcpListener, TcpAcceptor, TcpStream};
 use std::io::net::ip::{SocketAddr, IpAddr, Port};
 use std::io::{Acceptor, Listener, IoResult};
 use std::sync::Arc;
+use std::collections::DList;
 
 /// Core SMTP commands
 pub mod commands;
@@ -66,38 +67,38 @@ fn rust_gethostname() -> Result<String, ()> {
 }
 
 /// Gives access to the next middleware for a command.
-pub struct Next<CT, ST> {
-    middleware: Middleware<CT, ST>,
-    next: Box<Option<Next<CT, ST>>>
+pub struct NextMiddleware<CT, ST> {
+    callback: MiddlewareFn<CT, ST>,
+    next: Box<Option<NextMiddleware<CT, ST>>>
 }
 
-impl<CT, ST> Clone for Next<CT, ST> {
-    fn clone(&self) -> Next<CT, ST> {
-        Next {
-            middleware: self.middleware,
+impl<CT, ST> Clone for NextMiddleware<CT, ST> {
+    fn clone(&self) -> NextMiddleware<CT, ST> {
+        NextMiddleware {
+            callback: self.callback,
             next: box() (*self.next.clone())
         }
     }
 }
 
-impl<CT, ST> Next<CT, ST> {
+impl<CT, ST> NextMiddleware<CT, ST> {
     /// Call a command middleware.
-    pub fn call(&mut self, container: &mut CT, i: &mut InputStream<ST>, o: &mut OutputStream<ST>, l: &str) {
+    pub fn call(&self, container: &mut CT, i: &mut InputStream<ST>, o: &mut OutputStream<ST>, l: &str) {
         let opt = match *self.next {
             Some(ref next) => Some(next.clone()),
             None => None
         };
-        (self.middleware)(container, i, o, l, opt);
+        (self.callback)(container, i, o, l, opt);
     }
 }
 
 /// A command middleware callback.
-pub type Middleware<CT, ST> = fn(
+pub type MiddlewareFn<CT, ST> = fn(
     &mut CT,
     &mut InputStream<ST>,
     &mut OutputStream<ST>,
     &str,
-    Option<Next<CT, ST>>
+    Option<NextMiddleware<CT, ST>>
 ) -> ();
 
 /// An email server command.
@@ -108,7 +109,7 @@ pub type Middleware<CT, ST> = fn(
 #[deriving(Clone)]
 pub struct Command<CT, ST> {
     start: Option<String>,
-    middleware: Vec<Next<CT, ST>>,
+    front_middleware: Option<NextMiddleware<CT, ST>>,
 }
 
 impl<CT, ST> Command<CT, ST> {
@@ -116,7 +117,7 @@ impl<CT, ST> Command<CT, ST> {
     pub fn new() -> Command<CT, ST> {
         Command {
             start: None,
-            middleware: Vec::new()
+            front_middleware: None
         }
     }
 
@@ -126,11 +127,24 @@ impl<CT, ST> Command<CT, ST> {
     }
 
     /// Add a middleware to call for this command.
-    pub fn middleware(&mut self, middleware: Middleware<CT, ST>) {
-        self.middleware.push(Next {
-            middleware: middleware,
+    pub fn middleware(&mut self, callback: MiddlewareFn<CT, ST>) {
+        let next = Some(NextMiddleware {
+            callback: callback,
             next: box None
         });
+        match self.front_middleware {
+            Some(ref mut front) => {
+                front.next = box next;
+            },
+            None => {
+                self.front_middleware = next;
+            }
+        }
+    }
+
+    fn ready(&self) -> bool {
+        // TODO: complete this
+        true
     }
 }
 
@@ -244,44 +258,83 @@ impl<CT: Send + Clone> Server<CT> {
     }
 
     fn handle_commands(input: &mut InputStream<TcpStream>, output: &mut OutputStream<TcpStream>, container: &mut CT, commands: &[Command<CT, TcpStream>]) {
-        loop {
-            match input.read_line() {
+        'main: loop {
+            let line = match input.read_line() {
                 Ok(buffer) => {
-                    let line = String::from_utf8_lossy(buffer);
-                    println!("line: {}", line);
-                    for command in commands.iter() {
-                        println!("{}", command.start);
-                    }
+                    // The commands expect a regular human readable string.
+                    // Also, we need to make this an owned string because
+                    // the stream uses the same buffer for command lines and
+                    // text lines.
+                    //
+                    // TODO: use a different buffer for text lines and command
+                    // lines?
+                    String::from_utf8_lossy(buffer).into_owned()
                 },
                 Err(err) => {
-                    panic!("{}", err);
+                    panic!("Could not read command: {}", err);
+                }
+            };
+
+            // Find the right handler for this command line.
+            for command in commands.iter() {
+                // The right command starts with whatever we have set
+                // when we created the command. We use unwrap here, but
+                // the commands are checked before the server starts
+                // so this is always OK.
+                match command.start {
+                    Some(ref start) => {
+                        if line.as_slice().starts_with(start.as_slice()) {
+                            match command.front_middleware {
+                                Some(ref next) => {
+                                    next.call(container, input, output, line.as_slice());
+                                },
+                                None => {
+                                    // TODO: improve error message
+                                    panic!("Found a command with no middleware");
+                                }
+                            }
+                            continue 'main;
+                        }
+                    },
+                    None => {
+                        // TODO: improve error message
+                        panic!("Found a command with no start string");
+                    }
                 }
             }
-            // check if it exists
-                // yes: do each middleware
-                // no: not implemented error message
+
+            // If we get here, it means that no command matched.
+            output.write_line("500 Command unrecognized").unwrap();
         }
     }
 
-    fn handle_connection(&self, stream: IoResult<TcpStream>) {
+    fn handle_connection(&self, stream_res: IoResult<TcpStream>) {
         let mut container = self.container.clone();
         let commands = self.commands.clone();
         spawn(proc() {
-            let stream = stream.unwrap();
-            let mut input = InputStream::new(stream.clone(), 1000, false);
-            let mut output = OutputStream::new(stream.clone(), false);
+            match stream_res {
+                Ok(stream) => {
+                    let mut input = InputStream::new(stream.clone(), 1000, false);
+                    let mut output = OutputStream::new(stream.clone(), false);
 
-            Server::<CT>::handle_commands(
-                &mut input,
-                &mut output,
-                &mut container,
-                (*commands.deref()).as_slice()
-            );
+                    Server::<CT>::handle_commands(
+                        &mut input,
+                        &mut output,
+                        &mut container,
+                        (*commands.deref()).as_slice()
+                    );
+                },
+                Err(err) => {
+                    panic!("Could not accept client: {}", err);
+                }
+            }
         });
     }
 
     /// Start the SMTP server on the given address and port.
     pub fn listen(&mut self, ip: IpAddr, port: Port) -> ServerResult<()> {
+        // TODO: check that commands all are valid
+
         if self.hostname.len() == 0 {
             self.hostname = try!(self.get_hostname_from_system());
         }

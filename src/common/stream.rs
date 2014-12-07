@@ -112,7 +112,7 @@ impl<S: Reader> InputStream<S> {
     }
 
     /// Remove the previous line from the buffer when reading a new line.
-    fn move_buf(&mut self) {
+    pub fn move_buf(&mut self) {
         // Remove the last line, since we've used it already by now.
         match self.last_crlf {
             Some(p) => {
