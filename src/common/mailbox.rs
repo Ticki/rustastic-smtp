@@ -115,7 +115,7 @@ impl Mailbox {
         let mut foreign_part: MailboxForeignPart;
 
         // Skip the source routes as specified in RFC 5321.
-        let mut offset: uint = utils::get_source_route(s).map_or(0u, |s| s.len());
+        let mut offset = utils::get_source_route(s).map_or(0u, |s| s.len());
 
         // Get the local part.
         match get_mailbox_local_part(s.slice_from(offset)) {

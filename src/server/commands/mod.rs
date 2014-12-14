@@ -15,9 +15,15 @@
 /// The MAIL command.
 pub mod mail;
 
+/// The HELO & EHLO commands.
+pub mod helo;
+
 /// Allows commands to get access to information about the state of the
 /// current transaction.
 pub trait HeloSeen {
     /// Returns the state object for the current connection.
     fn helo_seen(&mut self) -> bool;
+
+    /// Sets if we have HELO or not.
+    fn set_helo_seen(&mut self, helo_seen: bool);
 }

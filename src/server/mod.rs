@@ -126,18 +126,28 @@ impl<CT, ST> Command<CT, ST> {
         self.start = Some(start.into_string());
     }
 
+    fn last_middleware<'a>(prev: &'a mut NextMiddleware<CT, ST>) -> &'a mut NextMiddleware<CT, ST> {
+        match *prev.next {
+            None => prev,
+            Some(ref mut next) => Command::last_middleware(next)
+        }
+    }
+
     /// Add a middleware to call for this command.
     pub fn middleware(&mut self, callback: MiddlewareFn<CT, ST>) {
+        // The upcoming item in the middleware chain.
         let next = Some(NextMiddleware {
             callback: callback,
             next: box None
         });
+
+        // Get the current last item, so we can append the new item.
         match self.front_middleware {
-            Some(ref mut front) => {
-                front.next = box next;
-            },
             None => {
                 self.front_middleware = next;
+            },
+            Some(_) => {
+                Command::last_middleware(self.front_middleware.as_mut().unwrap()).next = box next;
             }
         }
     }
@@ -224,6 +234,9 @@ impl<CT: Send + Clone> Server<CT> {
         self.commands.make_unique().push(command);
     }
 
+    // TODO: allow saying which extensions are supported by this server
+    // for use in EHLO response.
+
     fn increase_max_command_line_size(&mut self, bytes: uint) {
         self.max_command_line_size += bytes;
     }
@@ -283,10 +296,11 @@ impl<CT: Send + Clone> Server<CT> {
                 // so this is always OK.
                 match command.start {
                     Some(ref start) => {
+                        // TODO: make this case insensitive
                         if line.as_slice().starts_with(start.as_slice()) {
                             match command.front_middleware {
                                 Some(ref next) => {
-                                    next.call(container, input, output, line.as_slice());
+                                    next.call(container, input, output, line.as_slice().slice_from(start.len()));
                                 },
                                 None => {
                                     // TODO: improve error message
@@ -348,7 +362,7 @@ impl<CT: Send + Clone> Server<CT> {
 
         let mut acceptor = try!(self.get_acceptor_for_listener(listener));
 
-        println!("Server '{}'' listening on {}...", self.hostname, address);
+        println!("Server '{}' listening on {}...", self.hostname, address);
 
         for conn in acceptor.incoming() {
             self.handle_connection(conn);

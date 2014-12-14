@@ -92,7 +92,7 @@ fn handle_sender<CT: MailHandler>(container: &mut CT, input: &mut Input, output:
 }
 
 /// Returns the MAIL command
-pub fn get_mail_command<CT: HeloSeen + MailHandler + Clone + Send>() -> Command<CT, TcpStream> {
+pub fn get<CT: HeloSeen + MailHandler + Clone + Send>() -> Command<CT, TcpStream> {
     let mut command = Command::new();
     command.starts_with("MAIL FROM:");
     command.middleware(check_state);
