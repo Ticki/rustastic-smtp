@@ -23,6 +23,7 @@ use std::io::net::ip::{SocketAddr, IpAddr, Port};
 use std::io::{Acceptor, Listener, IoResult};
 use std::sync::Arc;
 use std::collections::DList;
+use std::thread::Thread;
 
 /// Core SMTP commands
 pub mod commands;
@@ -39,7 +40,7 @@ fn rust_gethostname() -> Result<String, ()> {
 
     let err = unsafe {
         gethostname(ptr as *mut libc::c_char, len as libc::size_t)
-    } as int;
+    } as i32;
 
     match err {
         0 => {
@@ -76,7 +77,7 @@ impl<CT, ST> Clone for NextMiddleware<CT, ST> {
     fn clone(&self) -> NextMiddleware<CT, ST> {
         NextMiddleware {
             callback: self.callback,
-            next: box() (*self.next.clone())
+            next: Box::new(*self.next.clone())
         }
     }
 }
@@ -138,7 +139,7 @@ impl<CT, ST> Command<CT, ST> {
         // The upcoming item in the middleware chain.
         let next = Some(NextMiddleware {
             callback: callback,
-            next: box None
+            next: Box::new(None)
         });
 
         // Get the current last item, so we can append the new item.
@@ -147,7 +148,7 @@ impl<CT, ST> Command<CT, ST> {
                 self.front_middleware = next;
             },
             Some(_) => {
-                Command::last_middleware(self.front_middleware.as_mut().unwrap()).next = box next;
+                Command::last_middleware(self.front_middleware.as_mut().unwrap()).next = Box::new(next);
             }
         }
     }
@@ -161,10 +162,10 @@ impl<CT, ST> Command<CT, ST> {
 /// An SMTP server, with no commands by default.
 pub struct Server<CT> {
     hostname: String,
-    max_recipients: uint,
-    max_message_size: uint,
-    max_command_line_size: uint,
-    max_text_line_size: uint,
+    max_recipients: u32,
+    max_message_size: u32,
+    max_command_line_size: u32,
+    max_text_line_size: u32,
     commands: Arc<Vec<Command<CT, TcpStream>>>,
     container: CT
 }
@@ -208,14 +209,14 @@ impl<CT: Send + Clone> Server<CT> {
         self.hostname = hostname.into_string();
     }
 
-    fn set_max_recipients(&mut self, max: uint) {
+    fn set_max_recipients(&mut self, max: u32) {
         if max < 100 {
             panic!("Maximum number of recipients must be >= 100.");
         }
         self.max_recipients = max;
     }
 
-    fn set_max_message_size(&mut self, max: uint) {
+    fn set_max_message_size(&mut self, max: u32) {
         if max < 65536 {
             panic!("Maximum message size must be >= 65536.");
         }
@@ -237,11 +238,11 @@ impl<CT: Send + Clone> Server<CT> {
     // TODO: allow saying which extensions are supported by this server
     // for use in EHLO response.
 
-    fn increase_max_command_line_size(&mut self, bytes: uint) {
+    fn increase_max_command_line_size(&mut self, bytes: u32) {
         self.max_command_line_size += bytes;
     }
 
-    fn increase_max_text_line_size(&mut self, bytes: uint) {
+    fn increase_max_text_line_size(&mut self, bytes: u32) {
         self.max_text_line_size += bytes;
     }
 
@@ -325,7 +326,7 @@ impl<CT: Send + Clone> Server<CT> {
     fn handle_connection(&self, stream_res: IoResult<TcpStream>) {
         let mut container = self.container.clone();
         let commands = self.commands.clone();
-        spawn(proc() {
+        Thread::spawn(move || {
             match stream_res {
                 Ok(stream) => {
                     let mut input = InputStream::new(stream.clone(), 1000, false);

@@ -20,16 +20,16 @@ use std::io::net::ip::IpAddr;
 use std::ascii::OwnedAsciiExt;
 
 /// Maximum length of the local part.
-static MAX_MAILBOX_LOCAL_PART_LEN: uint = 64;
+static MAX_MAILBOX_LOCAL_PART_LEN: u32 = 64;
 
 /// Maximum length of an email address.
 ///
 /// The RFC doesn't actually specify 254 chars, but it does say that a reverse path starts with
 /// "<", ends with ">" and including those symbols has a maximum length of 256.
-static MAX_MAILBOX_LEN: uint = 254;
+static MAX_MAILBOX_LEN: u32 = 254;
 
 /// Maximum length of a domain name.
-static MAX_DOMAIN_LEN: uint = 255;
+static MAX_DOMAIN_LEN: u32 = 255;
 
 #[test]
 fn test_static_vars() {
@@ -115,7 +115,7 @@ impl Mailbox {
         let mut foreign_part: MailboxForeignPart;
 
         // Skip the source routes as specified in RFC 5321.
-        let mut offset = utils::get_source_route(s).map_or(0u, |s| s.len());
+        let mut offset = utils::get_source_route(s).map_or(0u32, |s| s.len());
 
         // Get the local part.
         match get_mailbox_local_part(s.slice_from(offset)) {

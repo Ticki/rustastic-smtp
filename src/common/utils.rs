@@ -23,8 +23,8 @@ use std::str::FromStr;
 /// A subdomain is as described
 /// [in RFC 5321](http://tools.ietf.org/html/rfc5321#section-4.1.2).
 pub fn get_subdomain(s: &str) -> Option<&str> {
-    let mut i = 0u;
-    let mut len = 0u;
+    let mut i = 0u32;
+    let mut len = 0u32;
     if s.len() > 0 && is_alnum(s.char_at(0)) {
         i += 1;
         len = i;
@@ -115,7 +115,7 @@ fn test_get_domain() {
 /// An atom is as described
 /// [in RFC 5321](http://tools.ietf.org/html/rfc5321#section-4.1.2).
 pub fn get_atom(s: &str) -> Option<&str> {
-    let mut len = 0u;
+    let mut len = 0u32;
     while len < s.len() {
         if is_atext(s.char_at(len)) {
             len += 1
@@ -143,7 +143,7 @@ fn test_get_atom() {
 /// A dot-string is as described
 /// [in RFC 5321](http://tools.ietf.org/html/rfc5321#section-4.1.2).
 pub fn get_dot_string(s: &str) -> Option<&str> {
-    let mut len = 0u;
+    let mut len = 0u32;
 
     match get_atom(s) {
         Some(a1) => {
@@ -282,7 +282,7 @@ pub fn get_quoted_string(s: &str) -> Option<&str> {
     // We need at least "".
     if sl >= 2 && s.char_at(0) == '"' {
         // Length of 1 since we have the opening quote.
-        let mut len = 1u;
+        let mut len = 1u32;
         loop {
             // Regular text.
             if len < sl && is_qtext_smtp(s.char_at(len)) {
@@ -325,7 +325,7 @@ fn test_get_quoted_string() {
 /// Checks whether a character is valid `qtextSMTP` as described
 /// [in RFC 5322](http://tools.ietf.org/html/rfc5322#section-3.2.3).
 pub fn is_qtext_smtp(c: char) -> bool {
-    match c as int {
+    match c as i32 {
         32 ... 33 | 35 ... 91 | 93 ... 126 => true,
         _ => false
     }
@@ -352,7 +352,7 @@ fn test_is_qtext_smtp() {
 /// Checks if a pair of characters represent a `quoted-pairSMTP` as described
 /// [in RFC 5321](http://tools.ietf.org/html/rfc5321#section-4.1.2)
 pub fn is_quoted_pair_smtp(c1: char, c2: char) -> bool {
-    c1 as int == 92 && (c2 as int >= 32 && c2 as int <= 126)
+    c1 as i32 == 92 && (c2 as i32 >= 32 && c2 as i32 <= 126)
 }
 
 #[test]
@@ -399,7 +399,7 @@ fn test_get_at_domain() {
 /// [in RFC 5321](http://tools.ietf.org/html/rfc5321#section-4.1.2).
 pub fn get_source_route(s: &str) -> Option<&str> {
     // The total length we have found for source routes.
-    let mut len = 0u;
+    let mut len = 0u32;
 
     loop {
         // Get the current source route.
@@ -449,7 +449,7 @@ fn get_possible_mailbox_ipv6(ip: &str) -> Option<&str> {
     if ip.len() < 7 || ip.slice_to(6) != "[Ipv6:" {
         None
     } else {
-        let mut i = 6u;
+        let mut i = 6u32;
         while i < ip.len() && ip.char_at(i) != ']' {
             i += 1;
         }
@@ -478,7 +478,7 @@ fn get_possible_mailbox_ipv4(ip: &str) -> Option<&str> {
     if ip.len() < 3 || ip.char_at(0) != '[' || ip.char_at(1) > '9' || ip.char_at(1) < '0' {
         None
     } else {
-        let mut i = 1u;
+        let mut i = 1u32;
         while i < ip.len() && ip.char_at(i) != ']' {
             i += 1;
         }

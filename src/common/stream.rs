@@ -54,13 +54,13 @@ pub struct InputStream<S> {
     stream: S,
     /// Must be at least 1001 per RFC 5321, 1000 chars + 1 for transparency
     /// mechanism.
-    max_line_size: uint,
+    max_line_size: u32,
     /// Buffer to make reading more efficient and allow pipelining
     buf: Vec<u8>,
     /// If `true`, will print debug messages of input and output to the console.
     debug: bool,
     /// The position of the `<CRLF>` found at the previous `read_line`.
-    last_crlf: Option<uint>
+    last_crlf: Option<u32>
 }
 
 // The state of the `<CRLF>` search inside a buffer. See below.
@@ -72,7 +72,7 @@ enum CRLFState {
 }
 
 // Find the position of the first `<CRLF>` in a buffer.
-fn position_crlf(buf: &[u8]) -> Option<uint> {
+fn position_crlf(buf: &[u8]) -> Option<u32> {
     let mut state = CRLFState::Cr;
     let mut index = 0;
 
@@ -98,7 +98,7 @@ fn position_crlf(buf: &[u8]) -> Option<uint> {
 
 impl<S: Reader> InputStream<S> {
     /// Create a new `InputStream` from another stream.
-    pub fn new(inner: S, max_line_size: uint, debug: bool) -> InputStream<S> {
+    pub fn new(inner: S, max_line_size: u32, debug: bool) -> InputStream<S> {
         InputStream {
             stream: inner,
             max_line_size: max_line_size,
@@ -128,7 +128,7 @@ impl<S: Reader> InputStream<S> {
     }
 
     /// Fill the buffer to its limit.
-    fn fill_buf(&mut self) -> IoResult<uint> {
+    fn fill_buf(&mut self) -> IoResult<u32> {
         let len = self.buf.len();
         let cap = self.buf.capacity();
 
