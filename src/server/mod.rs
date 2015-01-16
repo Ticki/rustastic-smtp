@@ -226,14 +226,7 @@ impl<CT: Send + Clone> Server<CT> {
 
     /// Adds a command to the server.
     pub fn add_command(&mut self, command: Command<CT, TcpStream>) {
-        // TODO: Is `make_unique` OK here? I think yes, since the server
-        // is setup in its own thread and commands are only added before
-        // starting the server. This means `make_unique` should never clone
-        // the inner data, but instead always return a a reference to the
-        // original one. If it didn't, we might add the new command on a
-        // different vector from the one that the server has a reference too.
-        // Is that right ?
-        self.commands.make_unique().push(command);
+        self.commands.push(command);
     }
 
     // TODO: allow saying which extensions are supported by this server
@@ -337,7 +330,7 @@ impl<CT: Send + Clone> Server<CT> {
                         &mut input,
                         &mut output,
                         &mut container,
-                        (*commands.deref()).as_slice()
+                        commands.as_slice()
                     );
                 },
                 Err(err) => {
