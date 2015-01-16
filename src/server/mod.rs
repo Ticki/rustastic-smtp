@@ -320,7 +320,7 @@ impl<CT: Send + Clone> Server<CT> {
     fn handle_connection(&self, stream_res: IoResult<TcpStream>) {
         let mut container = self.container.clone();
         let commands = self.commands.clone();
-        Thread::spawn(move || {
+        let thread = Thread::spawn(move || {
             match stream_res {
                 Ok(stream) => {
                     let mut input = InputStream::new(stream.clone(), 1000, false);
@@ -338,6 +338,7 @@ impl<CT: Send + Clone> Server<CT> {
                 }
             }
         });
+        println!("Connection being handled in thread: {:?}", thread.name());
     }
 
     /// Start the SMTP server on the given address and port.
