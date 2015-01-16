@@ -59,7 +59,7 @@ fn check_domain<CT>(container: &mut CT, input: &mut Input, output: &mut Output, 
     }
 }
 
-fn handle_domain<CT: HeloSeen + HeloHandler>(container: &mut CT, input: &mut Input, output: &mut Output, line: &str, next: Next<CT>) {
+fn handle_domain<CT: HeloSeen + HeloHandler>(container: &mut CT, _: &mut Input, output: &mut Output, line: &str, _: Next<CT>) {
     match container.handle_domain(line) {
         Ok(_) => {
             container.set_helo_seen(true);

@@ -22,7 +22,6 @@ use std::io::net::tcp::{TcpListener, TcpAcceptor, TcpStream};
 use std::io::net::ip::{SocketAddr, IpAddr, Port};
 use std::io::{Acceptor, Listener, IoResult};
 use std::sync::Arc;
-use std::collections::DList;
 use std::thread::Thread;
 use std::borrow::ToOwned;
 
@@ -172,6 +171,7 @@ pub struct Server<CT> {
 }
 
 /// An error that occures when a server starts up
+#[derive(PartialEq, Eq, Clone, Show, Copy)]
 pub enum ServerError {
     /// The hostname could not be retrieved from the system
     Hostname,

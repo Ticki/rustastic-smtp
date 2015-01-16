@@ -87,7 +87,7 @@ pub struct Mailbox {
 }
 
 /// Represents an error that occured while trying to parse an email address.
-#[derive(PartialEq, Eq, Clone, Show)]
+#[derive(PartialEq, Eq, Clone, Show, Copy)]
 pub enum MailboxParseError {
     /// The maximum length of 64 octets [as per RFC 5321](http://tools.ietf.org/html/rfc5321#section-4.5.3.1.1) is exceeded.
     LocalPartTooLong,

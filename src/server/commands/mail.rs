@@ -73,7 +73,7 @@ fn handle_no_sender<CT: MailHandler>(container: &mut CT, input: &mut Input, outp
     }
 }
 
-fn handle_sender<CT: MailHandler>(container: &mut CT, input: &mut Input, output: &mut Output, line: &str, next: Next<CT>) {
+fn handle_sender<CT: MailHandler>(container: &mut CT, _: &mut Input, output: &mut Output, line: &str, _: Next<CT>) {
     match Mailbox::parse(line.slice(1, line.len() - 1)) {
         Err(err) => {
             output.write_line(format!("553 Email address invalid: {:?}", err).as_slice()).unwrap();
