@@ -24,6 +24,7 @@ use std::io::{Acceptor, Listener, IoResult};
 use std::sync::Arc;
 use std::collections::DList;
 use std::thread::Thread;
+use std::borrow::ToOwned;
 
 /// Core SMTP commands
 pub mod commands;
@@ -124,7 +125,7 @@ impl<CT, ST> Command<CT, ST> {
 
     /// Describes the start of the command line for this command.
     pub fn starts_with(&mut self, start: &str) {
-        self.start = Some(start.into_string());
+        self.start = Some(start.to_owned());
     }
 
     fn last_middleware<'a>(prev: &'a mut NextMiddleware<CT, ST>) -> &'a mut NextMiddleware<CT, ST> {
@@ -206,7 +207,7 @@ impl<CT: Send + Clone> Server<CT> {
     }
 
     fn set_hostname(&mut self, hostname: &str) {
-        self.hostname = hostname.into_string();
+        self.hostname = hostname.to_owned();
     }
 
     fn set_max_recipients(&mut self, max: usize) {

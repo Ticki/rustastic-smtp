@@ -297,34 +297,34 @@ fn test_read_line() {
     path = Path::new("tests/stream/1line1");
     file = File::open(&path).unwrap();
     stream = InputStream::new(file, MIN_ALLOWED_LINE_SIZE, false);
-    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).into_string().as_slice(), "hello world!");
+    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).to_owned().as_slice(), "hello world!");
     assert!(!stream.read_line().is_ok());
 
     path = Path::new("tests/stream/1line2");
     file = File::open(&path).unwrap();
     stream = InputStream::new(file, MIN_ALLOWED_LINE_SIZE, false);
-    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).into_string().as_slice(), "hello world!");
+    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).to_owned().as_slice(), "hello world!");
     assert!(!stream.read_line().is_ok());
 
     path = Path::new("tests/stream/2lines1");
     file = File::open(&path).unwrap();
     stream = InputStream::new(file, MIN_ALLOWED_LINE_SIZE, false);
-    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).into_string().as_slice(), "hello world!");
-    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).into_string().as_slice(), "bye bye world!");
+    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).to_owned().as_slice(), "hello world!");
+    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).to_owned().as_slice(), "bye bye world!");
     assert!(!stream.read_line().is_ok());
 
     expected = String::from_char(62, 'x');
     path = Path::new("tests/stream/xlines1");
     file = File::open(&path).unwrap();
     stream = InputStream::new(file, MIN_ALLOWED_LINE_SIZE, false);
-    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).into_string(), expected);
-    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).into_string(), expected);
-    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).into_string(), expected);
-    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).into_string(), expected);
-    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).into_string(), expected);
-    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).into_string(), expected);
-    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).into_string(), expected);
-    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).into_string(), expected);
-    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).into_string(), expected);
+    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).to_owned(), expected);
+    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).to_owned(), expected);
+    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).to_owned(), expected);
+    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).to_owned(), expected);
+    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).to_owned(), expected);
+    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).to_owned(), expected);
+    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).to_owned(), expected);
+    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).to_owned(), expected);
+    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).to_owned(), expected);
     assert!(!stream.read_line().is_ok());
 }
