@@ -108,7 +108,7 @@ pub type MiddlewareFn<CT, ST> = fn(
 /// It is defined by the string you find at the start of the command, for
 /// example "MAIL FROM:" or "EHLO ", as well as a bunch of middleware parts
 /// that are executed sequentially until one says to stop.
-#[deriving(Clone)]
+#[derive(Clone)]
 pub struct Command<CT, ST> {
     start: Option<String>,
     front_middleware: Option<NextMiddleware<CT, ST>>,
@@ -226,7 +226,7 @@ impl<CT: Send + Clone> Server<CT> {
 
     /// Adds a command to the server.
     pub fn add_command(&mut self, command: Command<CT, TcpStream>) {
-        self.commands.push(command);
+        self.commands.make_unique().push(command);
     }
 
     // TODO: allow saying which extensions are supported by this server

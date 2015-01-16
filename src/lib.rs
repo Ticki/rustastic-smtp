@@ -32,7 +32,7 @@
 //! };
 //! use std::io::net::ip::IpAddr;
 //!
-//! #[deriving(Clone)]
+//! #[derive(Clone)]
 //! struct Handler;
 //!
 //! impl SmtpServerEventHandler for Handler {
