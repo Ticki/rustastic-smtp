@@ -18,6 +18,6 @@ pub mod stream;
 pub mod mailbox;
 pub mod utils;
 
-pub static MIN_ALLOWED_MESSAGE_SIZE: u32 = 65536;
-pub static MIN_ALLOWED_LINE_SIZE: u32 = 1000;
-pub static MIN_ALLOWED_RECIPIENTS: u32 = 100;
+pub static MIN_ALLOWED_MESSAGE_SIZE: usize = 65536;
+pub static MIN_ALLOWED_LINE_SIZE: usize = 1000;
+pub static MIN_ALLOWED_RECIPIENTS: usize = 100;

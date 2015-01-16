@@ -40,7 +40,7 @@ fn rust_gethostname() -> Result<String, ()> {
 
     let err = unsafe {
         gethostname(ptr as *mut libc::c_char, len as libc::size_t)
-    } as i32;
+    } as isize;
 
     match err {
         0 => {
@@ -162,10 +162,10 @@ impl<CT, ST> Command<CT, ST> {
 /// An SMTP server, with no commands by default.
 pub struct Server<CT> {
     hostname: String,
-    max_recipients: u32,
-    max_message_size: u32,
-    max_command_line_size: u32,
-    max_text_line_size: u32,
+    max_recipients: usize,
+    max_message_size: usize,
+    max_command_line_size: usize,
+    max_text_line_size: usize,
     commands: Arc<Vec<Command<CT, TcpStream>>>,
     container: CT
 }
@@ -209,14 +209,14 @@ impl<CT: Send + Clone> Server<CT> {
         self.hostname = hostname.into_string();
     }
 
-    fn set_max_recipients(&mut self, max: u32) {
+    fn set_max_recipients(&mut self, max: usize) {
         if max < 100 {
             panic!("Maximum number of recipients must be >= 100.");
         }
         self.max_recipients = max;
     }
 
-    fn set_max_message_size(&mut self, max: u32) {
+    fn set_max_message_size(&mut self, max: usize) {
         if max < 65536 {
             panic!("Maximum message size must be >= 65536.");
         }
@@ -238,11 +238,11 @@ impl<CT: Send + Clone> Server<CT> {
     // TODO: allow saying which extensions are supported by this server
     // for use in EHLO response.
 
-    fn increase_max_command_line_size(&mut self, bytes: u32) {
+    fn increase_max_command_line_size(&mut self, bytes: usize) {
         self.max_command_line_size += bytes;
     }
 
-    fn increase_max_text_line_size(&mut self, bytes: u32) {
+    fn increase_max_text_line_size(&mut self, bytes: usize) {
         self.max_text_line_size += bytes;
     }
 
