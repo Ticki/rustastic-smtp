@@ -199,8 +199,8 @@ impl Mailbox {
                 // the individual commands that a server wishes to implement.
                 //
                 // RFC 5336: https://tools.ietf.org/html/rfc5336
-                local_part = local_part.into_ascii_lowercase();
-                if local_part.as_slice() == "postmaster" {
+                let local_part_c = local_part.clone().into_ascii_lowercase();
+                if local_part_c.as_slice() == "postmaster" {
                     local_part = "postmaster".to_owned();
                 }
             }
