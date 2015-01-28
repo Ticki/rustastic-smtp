@@ -19,16 +19,11 @@ use super::super::super::common::utils;
 use super::super::NextMiddleware;
 use super::super::Command;
 use super::HeloSeen;
+use super::HeloHandler;
 
 type Next<CT> = Option<NextMiddleware<CT, TcpStream>>;
 type Input = InputStream<TcpStream>;
 type Output = OutputStream<TcpStream>;
-
-/// Methods needed by the mail command to read the current state.
-pub trait HeloHandler {
-    /// Handles the domain passed to the HELO/EHLO command.
-    fn handle_domain(&mut self, domain: &str) -> Result<(), ()>;
-}
 
 fn check_state<CT: HeloSeen>(container: &mut CT, input: &mut Input, output: &mut Output, line: &str, next: Next<CT>) {
     match container.helo_seen() {

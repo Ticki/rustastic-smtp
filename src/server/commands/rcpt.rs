@@ -16,10 +16,13 @@ use std::io::net::tcp::TcpStream;
 use super::super::super::common::mailbox::Mailbox;
 use super::super::super::common::stream::InputStream;
 use super::super::super::common::stream::OutputStream;
+use super::super::super::common::utils;
 use super::super::NextMiddleware;
 use super::super::Command;
 use super::HeloSeen;
+use super::HeloHandler;
 use super::MailHandler;
+use super::RcptHandler;
 
 type Next<CT> = Option<NextMiddleware<CT, TcpStream>>;
 type Input = InputStream<TcpStream>;
@@ -47,31 +50,13 @@ fn check_mailbox_format<CT>(container: &mut CT, input: &mut Input, output: &mut 
     }
 }
 
-fn handle_no_sender<CT: MailHandler>(container: &mut CT, input: &mut Input, output: &mut Output, line: &str, next: Next<CT>) {
-    match line == "<>" {
-        true => {
-            match container.handle_sender_address(None) {
-                Ok(_) => {
-                    output.write_line("250 OK").unwrap();
-                },
-                Err(_) => {
-                    output.write_line("550 Mailbox not taken").unwrap();
-                }
-            }
-        },
-        false => {
-            next.unwrap().call(container, input, output, line);
-        }
-    }
-}
-
-fn handle_sender<CT: MailHandler>(container: &mut CT, _: &mut Input, output: &mut Output, line: &str, _: Next<CT>) {
+fn handle_receiver<CT: RcptHandler>(container: &mut CT, _: &mut Input, output: &mut Output, line: &str, _: Next<CT>) {
     match Mailbox::parse(line.slice(1, line.len() - 1)) {
         Err(err) => {
             output.write_line(format!("553 Email address invalid: {:?}", err).as_slice()).unwrap();
         },
         Ok(mailbox) => {
-            match container.handle_sender_address(Some(mailbox)) {
+            match container.handle_receiver_address(mailbox) {
                 Ok(_) => {
                     output.write_line("250 OK").unwrap();
                 },
@@ -84,12 +69,11 @@ fn handle_sender<CT: MailHandler>(container: &mut CT, _: &mut Input, output: &mu
 }
 
 /// Returns the MAIL command
-pub fn get<CT: HeloSeen + MailHandler + Clone + Send>() -> Command<CT, TcpStream> {
+pub fn get<CT: HeloSeen + RcptHandler + Clone + Send>() -> Command<CT, TcpStream> {
     let mut command = Command::new();
-    command.starts_with("MAIL FROM:");
+    command.starts_with("RCPT TO:");
     command.middleware(check_state);
     command.middleware(check_mailbox_format);
-    command.middleware(handle_no_sender);
-    command.middleware(handle_sender);
+    command.middleware(handle_receiver);
     command
 }

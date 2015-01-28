@@ -64,7 +64,6 @@
 #![deny(unused_typecasts)]
 #![deny(missing_docs)]
 #![deny(unused_results)]
-#![allow(unstable)]
 
 pub mod client;
 pub mod common;
