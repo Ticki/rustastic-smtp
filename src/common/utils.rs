@@ -43,7 +43,7 @@ pub fn get_subdomain(s: &str) -> Option<&str> {
     }
     match len {
         0 => None,
-        _ => Some(s.slice_to(len))
+        _ => Some(&s[.. len])
     }
 }
 
@@ -72,7 +72,7 @@ pub fn get_domain(s: &str) -> Option<&str> {
         Some(sd1) => {
             let mut len = sd1.len();
             while len < s.len() && s.char_at(len) == '.' {
-                match get_subdomain(s.slice_from(len + 1)) {
+                match get_subdomain(&s[len + 1 ..]) {
                     Some(sdx) => {
                         len += 1 + sdx.len();
                     },
@@ -81,7 +81,7 @@ pub fn get_domain(s: &str) -> Option<&str> {
                     }
                 }
             }
-            Some(s.slice_to(len))
+            Some(&s[.. len])
         },
         None => None
     }
@@ -125,7 +125,7 @@ pub fn get_atom(s: &str) -> Option<&str> {
     }
     match len {
         0 => None,
-        _ => Some(s.slice_to(len))
+        _ => Some(&s[.. len])
     }
 }
 
@@ -149,7 +149,7 @@ pub fn get_dot_string(s: &str) -> Option<&str> {
         Some(a1) => {
             len += a1.len();
             while len < s.len() && s.char_at(len) == '.' {
-                match get_atom(s.slice_from(len + 1)) {
+                match get_atom(&s[len + 1 ..]) {
                     Some(a) => {
                         len += 1 + a.len();
                     },
@@ -158,7 +158,7 @@ pub fn get_dot_string(s: &str) -> Option<&str> {
                     }
                 }
             }
-            Some(s.slice_to(len))
+            Some(&s[.. len])
         },
         None => {
             None
@@ -296,7 +296,7 @@ pub fn get_quoted_string(s: &str) -> Option<&str> {
             }
         }
         if len < sl && s.char_at(len) == '"' {
-            Some(s.slice_to(len + 1))
+            Some(&s[.. len + 1])
         } else {
             None
         }
@@ -371,9 +371,9 @@ fn test_is_quoted_pair_smtp() {
 /// [in RFC 5321](http://tools.ietf.org/html/rfc5321#section-4.1.2).
 pub fn get_at_domain(s: &str) -> Option<&str> {
     if s.len() > 1 && s.char_at(0) == '@' {
-        match get_domain(s.slice_from(1)) {
+        match get_domain(&s[1 ..]) {
             Some(d) => {
-                Some(s.slice_to(1 + d.len()))
+                Some(&s[.. 1 + d.len()])
             },
             None => None
         }
@@ -403,7 +403,7 @@ pub fn get_source_route(s: &str) -> Option<&str> {
 
     loop {
         // Get the current source route.
-        match get_at_domain(s.slice_from(len)) {
+        match get_at_domain(&s[len ..]) {
             Some(ad) => {
                 len += ad.len();
                 // Check if another source route is coming, if not, stop looking
@@ -422,7 +422,7 @@ pub fn get_source_route(s: &str) -> Option<&str> {
 
     // Expect the source route declaration to end with ':'.
     if len < s.len() && s.char_at(len) == ':' {
-        Some(s.slice_to(len + 1))
+        Some(&s[.. len + 1])
     } else {
         None
     }
@@ -446,7 +446,7 @@ fn test_get_source_route() {
 /// If the string starts with an ipv6 as present in email addresses, ie `[Ipv6:...]`, get its
 /// length. Else return `0`.
 fn get_possible_mailbox_ipv6(ip: &str) -> Option<&str> {
-    if ip.len() < 7 || ip.slice_to(6) != "[Ipv6:" {
+    if ip.len() < 7 || &ip[.. 6] != "[Ipv6:" {
         None
     } else {
         let mut i = 6;
@@ -454,7 +454,7 @@ fn get_possible_mailbox_ipv6(ip: &str) -> Option<&str> {
             i += 1;
         }
         if i < ip.len() && ip.char_at(i) == ']' {
-            Some(ip.slice_to(i + 1))
+            Some(&ip[.. i + 1])
         } else {
             None
         }
@@ -483,7 +483,7 @@ fn get_possible_mailbox_ipv4(ip: &str) -> Option<&str> {
             i += 1;
         }
         if i < ip.len() && ip.char_at(i) == ']' {
-            Some(ip.slice_to(i + 1))
+            Some(&ip[.. i + 1])
         } else {
             None
         }
@@ -502,23 +502,23 @@ fn test_get_possible_mailbox_ipv4() {
 pub fn get_mailbox_ip(s: &str) -> Option<(&str, IpAddr)> {
     get_possible_mailbox_ipv4(s).and_then(|ip| {
         // The IP without prefix / suffix.
-        let stripped_ip = s.slice(
+        let stripped_ip = &s[
             // Start after the prefix "[" as in "[127.0.0.1]"
-            1,
+            1 ..
             // Go until before the suffix "]".
             ip.len() - 1
-        );
+        ];
 
         // Try to parse the IP address.
         FromStr::from_str(stripped_ip).map(|addr| (ip, addr))
     }).or(get_possible_mailbox_ipv6(s).and_then(|ip| {
         // The IP without prefix / suffix.
-        let stripped_ip = s.slice(
+        let stripped_ip = &s[
             // Start after the prefix "[Ipv6:" as in "[Ipv6:::1]"
-            6,
+            6 ..
             // Go until before the suffix "]".
             ip.len() - 1
-        );
+        ];
 
         // Try to parse the IP address.
         FromStr::from_str(stripped_ip).map(|addr| (ip, addr))

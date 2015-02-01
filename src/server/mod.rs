@@ -314,11 +314,12 @@ impl<CT: Send + Clone> Server<CT> {
                 // so this is always OK.
                 match command.start {
                     Some(ref start) => {
+                        let ls = line.as_slice();
                         // TODO: make this case insensitive
-                        if line.as_slice().starts_with(start.as_slice()) {
+                        if ls.starts_with(start.as_slice()) {
                             match command.front_middleware {
                                 Some(ref next) => {
-                                    next.call(server, container, input, output, line.as_slice().slice_from(start.len()));
+                                    next.call(server, container, input, output, &ls[start.len() ..]);
                                 },
                                 None => {
                                     // TODO: improve error message

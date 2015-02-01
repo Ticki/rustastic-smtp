@@ -120,7 +120,7 @@ impl Mailbox {
         let mut offset = utils::get_source_route(s).map_or(0, |s| s.len());
 
         // Get the local part.
-        match get_mailbox_local_part(s.slice_from(offset)) {
+        match get_mailbox_local_part(&s[offset ..]) {
             Some(lp) => {
                 if lp.len() > MAX_MAILBOX_LOCAL_PART_LEN {
                     return Err(MailboxParseError::LocalPartTooLong);
@@ -144,7 +144,7 @@ impl Mailbox {
         }
         offset += 1;
 
-        match utils::get_domain(s.slice_from(offset)) {
+        match utils::get_domain(&s[offset ..]) {
             Some(d) => {
                 // Is the domain is too long ?
                 if d.len() > MAX_DOMAIN_LEN {
@@ -152,12 +152,12 @@ impl Mailbox {
                 }
                 // Save the domain.
                 foreign_part = MailboxForeignPart::Domain(
-                    s.slice(offset, offset + d.len()).to_owned()
+                    s[offset .. offset + d.len()].to_owned()
                 );
                 offset += d.len();
             },
             None => {
-                match utils::get_mailbox_ip(s.slice_from(offset)) {
+                match utils::get_mailbox_ip(&s[offset ..]) {
                     Some((ip, addr)) => {
                         foreign_part = MailboxForeignPart::IpAddr(addr);
                         offset += ip.len();

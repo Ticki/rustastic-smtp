@@ -118,7 +118,7 @@ impl<S: Reader> InputStream<S> {
             Some(p) => {
                 // TODO: This could probably be optimised by shifting bytes instead
                 // of re-allocating.
-                self.buf = self.buf.as_slice().slice_from(p + 2).to_vec();
+                self.buf = self.buf.as_slice()[p + 2 ..].to_vec();
                 self.buf.reserve(self.max_line_size);
             },
             _ => {}
@@ -147,7 +147,7 @@ impl<S: Reader> InputStream<S> {
             // First, let's check if the buffer already contains a line. This
             // reduces the number of syscalls.
             Some(last_crlf) => {
-                let s = self.buf.slice_to(last_crlf);
+                let s = &self.buf[.. last_crlf];
                 self.last_crlf = Some(last_crlf);
                 Ok(s)
             },
@@ -158,7 +158,7 @@ impl<S: Reader> InputStream<S> {
                     Ok(_) => {
                         match position_crlf(self.buf.as_slice()) {
                             Some(last_crlf) => {
-                                let s = self.buf.slice_to(last_crlf);
+                                let s = &self.buf[.. last_crlf];
                                 self.last_crlf = Some(last_crlf);
                                 Ok(s)
                             },

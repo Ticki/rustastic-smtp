@@ -52,7 +52,7 @@ fn check_mailbox_format<CT>(server: &Server<CT>, container: &mut CT, input: &mut
 }
 
 fn handle_receiver<CT: RcptHandler>(server: &Server<CT>, container: &mut CT, _: &mut Input, output: &mut Output, line: &str, _: Next<CT>) {
-    match Mailbox::parse(line.slice(1, line.len() - 1)) {
+    match Mailbox::parse(&line[1 .. line.len() - 1]) {
         Err(err) => {
             output.write_line(format!("553 Email address invalid: {:?}", err).as_slice()).unwrap();
         },
