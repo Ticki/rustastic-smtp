@@ -16,7 +16,7 @@
 
 use std::string::String;
 use super::utils;
-use std::io::net::ip::IpAddr;
+use std::old_io::net::ip::IpAddr;
 use std::ascii::OwnedAsciiExt;
 use std::ascii::AsciiExt;
 use std::borrow::ToOwned;
@@ -54,7 +54,7 @@ fn test_local_part() {
 }
 
 /// Represents the foreign part of an email address, aka the host.
-#[derive(PartialEq, Eq, Clone, Show)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub enum MailboxForeignPart {
     /// The foreign part is a domain name.
     Domain(String),
@@ -80,14 +80,14 @@ fn test_foreign_part() {
 /// It is composed of a local part and a foreign part. If the address is sent to the `Postmaster`
 /// address for a domain, then the local part will always be converted `postmaster`, all lowercase.
 /// Since the `Postmaster` address must be handled without regard for case, this makes things simpler.
-#[derive(PartialEq, Eq, Clone, Show)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Mailbox {
     local_part: String,
     foreign_part: MailboxForeignPart
 }
 
 /// Represents an error that occured while trying to parse an email address.
-#[derive(PartialEq, Eq, Clone, Show, Copy)]
+#[derive(PartialEq, Eq, Clone, Debug, Copy)]
 pub enum MailboxParseError {
     /// The maximum length of 64 octets [as per RFC 5321](http://tools.ietf.org/html/rfc5321#section-4.5.3.1.1) is exceeded.
     LocalPartTooLong,

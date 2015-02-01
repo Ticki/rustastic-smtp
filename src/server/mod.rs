@@ -18,10 +18,9 @@
 extern crate libc;
 
 use super::common::stream::{InputStream, OutputStream};
-use std::io::net::tcp::{TcpListener, TcpAcceptor, TcpStream};
-use std::io::net::ip::{SocketAddr, IpAddr, Port};
-use std::io::{Acceptor, Listener, IoResult};
-use std::sync::Arc;
+use std::old_io::net::tcp::{TcpListener, TcpAcceptor, TcpStream};
+use std::old_io::net::ip::{SocketAddr, IpAddr, Port};
+use std::old_io::{Acceptor, Listener, IoResult};
 use std::thread::Thread;
 use std::borrow::ToOwned;
 
@@ -76,31 +75,41 @@ pub struct NextMiddleware<CT, ST> {
 impl<CT, ST> Clone for NextMiddleware<CT, ST> {
     fn clone(&self) -> NextMiddleware<CT, ST> {
         NextMiddleware {
-            callback: self.callback,
-            next: Box::new(*self.next.clone())
+            callback: self.callback.clone(),
+            next: self.next.clone()
         }
     }
 }
 
 impl<CT, ST> NextMiddleware<CT, ST> {
     /// Call a command middleware.
-    pub fn call(&self, container: &mut CT, i: &mut InputStream<ST>, o: &mut OutputStream<ST>, l: &str) {
-        let opt = match *self.next {
-            Some(ref next) => Some(next.clone()),
-            None => None
-        };
-        (self.callback)(container, i, o, l, opt);
+    pub fn call(&self, server: &Server<CT>, container: &mut CT, i: &mut InputStream<ST>, o: &mut OutputStream<ST>, l: &str) {
+        match *self.next {
+            Some(ref next) => {
+                (self.callback)(server, container, i, o, l, Some(next.clone()));
+            },
+            None => {
+                (self.callback)(server, container, i, o, l, None);
+            }
+        }
     }
 }
 
 /// A command middleware callback.
 pub type MiddlewareFn<CT, ST> = fn(
+    &Server<CT>,
     &mut CT,
     &mut InputStream<ST>,
     &mut OutputStream<ST>,
     &str,
     Option<NextMiddleware<CT, ST>>
 ) -> ();
+
+impl<CT, ST> Clone for MiddlewareFn<CT, ST> {
+    fn clone(&self) -> MiddlewareFn<CT, ST> {
+        *self
+    }
+}
 
 /// An email server command.
 ///
@@ -166,12 +175,12 @@ pub struct Server<CT> {
     max_message_size: usize,
     max_command_line_size: usize,
     max_text_line_size: usize,
-    commands: Arc<Vec<Command<CT, TcpStream>>>,
+    commands: Vec<Command<CT, TcpStream>>,
     container: CT
 }
 
 /// An error that occures when a server starts up
-#[derive(PartialEq, Eq, Clone, Show, Copy)]
+#[derive(PartialEq, Eq, Clone, Debug, Copy)]
 pub enum ServerError {
     /// The hostname could not be retrieved from the system
     Hostname,
@@ -186,7 +195,21 @@ pub type ServerResult<T> = Result<T, ServerError>;
 
 // TODO: logging, via a Trait on the container?
 // TODO: fatal error handling
-// TODO: actual TCP listening and command handling
+
+impl<CT: Send + Clone> Clone for Server<CT> {
+    /// Creates a new SMTP server from another SMTP server.
+    fn clone(&self) -> Server<CT> {
+        Server {
+            hostname: self.hostname.clone(),
+            max_recipients: self.max_recipients,
+            max_message_size: self.max_message_size,
+            max_command_line_size: self.max_command_line_size,
+            max_text_line_size: self.max_text_line_size,
+            commands: self.commands.clone(),
+            container: self.container.clone()
+        }
+    }
+}
 
 impl<CT: Send + Clone> Server<CT> {
     /// Creates a new SMTP server.
@@ -201,7 +224,7 @@ impl<CT: Send + Clone> Server<CT> {
             max_message_size: 65536,
             max_command_line_size: 512,
             max_text_line_size: 1000,
-            commands: Arc::new(Vec::with_capacity(16)),
+            commands: Vec::with_capacity(16),
             container: container
         }
     }
@@ -226,7 +249,7 @@ impl<CT: Send + Clone> Server<CT> {
 
     /// Adds a command to the server.
     pub fn add_command(&mut self, command: Command<CT, TcpStream>) {
-        self.commands.make_unique().push(command);
+        self.commands.push(command);
     }
 
     // TODO: allow saying which extensions are supported by this server
@@ -265,7 +288,7 @@ impl<CT: Send + Clone> Server<CT> {
         }
     }
 
-    fn handle_commands(input: &mut InputStream<TcpStream>, output: &mut OutputStream<TcpStream>, container: &mut CT, commands: &[Command<CT, TcpStream>]) {
+    fn handle_commands(server: &Server<CT>, input: &mut InputStream<TcpStream>, output: &mut OutputStream<TcpStream>, container: &mut CT, commands: &[Command<CT, TcpStream>]) {
         'main: loop {
             let line = match input.read_line() {
                 Ok(buffer) => {
@@ -295,7 +318,7 @@ impl<CT: Send + Clone> Server<CT> {
                         if line.as_slice().starts_with(start.as_slice()) {
                             match command.front_middleware {
                                 Some(ref next) => {
-                                    next.call(container, input, output, line.as_slice().slice_from(start.len()));
+                                    next.call(server, container, input, output, line.as_slice().slice_from(start.len()));
                                 },
                                 None => {
                                     // TODO: improve error message
@@ -317,9 +340,10 @@ impl<CT: Send + Clone> Server<CT> {
         }
     }
 
-    fn handle_connection(&self, stream_res: IoResult<TcpStream>) {
+    fn handle_connection<'y>(&'y self, stream_res: IoResult<TcpStream>) {
         let mut container = self.container.clone();
         let commands = self.commands.clone();
+        let server = self.clone();
         let thread = Thread::spawn(move || {
             match stream_res {
                 Ok(stream) => {
@@ -327,6 +351,7 @@ impl<CT: Send + Clone> Server<CT> {
                     let mut output = OutputStream::new(stream.clone(), false);
 
                     Server::<CT>::handle_commands(
+                        &server,
                         &mut input,
                         &mut output,
                         &mut container,

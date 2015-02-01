@@ -17,8 +17,11 @@ use super::super::common::mailbox::Mailbox;
 /// The MAIL command.
 pub mod mail;
 
-/// The HELO & EHLO commands.
+/// The HELO command.
 pub mod helo;
+
+/// The EHLO command.
+pub mod ehlo;
 
 /// The RCPT command.
 pub mod rcpt;

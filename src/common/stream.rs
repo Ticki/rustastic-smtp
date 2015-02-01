@@ -14,12 +14,12 @@
 
 //! Tools for reading/writing from SMTP clients to SMTP servers and vice-versa.
 
-use std::io::{Reader, Writer, IoResult, IoError, InvalidInput};
+use std::old_io::{Reader, Writer, IoResult, IoError, InvalidInput};
 use std::vec::Vec;
 #[allow(unused_imports)]
-use std::io::{Truncate, Open, Read, Write};
+use std::old_io::{Truncate, Open, Read, Write};
 #[allow(unused_imports)]
-use std::io::fs::File;
+use std::old_io::fs::File;
 #[allow(unused_imports)]
 use super::{MIN_ALLOWED_LINE_SIZE};
 
@@ -35,7 +35,7 @@ fn test_static_vars() {
 ///
 /// # Example
 /// ```no_run
-/// use std::io::TcpStream;
+/// use std::old_io::TcpStream;
 /// use rsmtp::common::stream::InputStream;
 /// use rsmtp::common::{
 ///     MIN_ALLOWED_LINE_SIZE,

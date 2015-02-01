@@ -70,7 +70,7 @@ fn handle_domain<CT: HeloSeen + HeloHandler>(server: &Server<CT>, container: &mu
 /// Returns the MAIL command
 pub fn get<CT: HeloSeen + HeloHandler + Clone + Send>() -> Command<CT, TcpStream> {
     let mut command = Command::new();
-    command.starts_with("HELO ");
+    command.starts_with("EHLO ");
     command.middleware(check_state);
     command.middleware(check_domain);
     command.middleware(handle_domain);

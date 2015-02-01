@@ -30,7 +30,7 @@
 //!     MIN_ALLOWED_LINE_SIZE,
 //!     MIN_ALLOWED_RECIPIENTS
 //! };
-//! use std::io::net::ip::IpAddr;
+//! use std::old_io::net::ip::IpAddr;
 //!
 //! #[derive(Clone)]
 //! struct Handler;

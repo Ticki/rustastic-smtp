@@ -14,7 +14,7 @@
 
 //! Utility functions used in SMTP clients and SMTP servers.
 
-use std::io::net::ip::IpAddr;
+use std::old_io::net::ip::IpAddr;
 use std::str::FromStr;
 
 /// Returns the length of the longest subdomain found at the beginning
