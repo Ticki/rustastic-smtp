@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::old_io::net::tcp::TcpStream;
-use super::super::Server;
+use super::super::ServerConfig;
 use super::super::super::common::stream::InputStream;
 use super::super::super::common::stream::OutputStream;
 use super::super::super::common::utils;
@@ -26,18 +26,18 @@ type Next<CT> = Option<NextMiddleware<CT, TcpStream>>;
 type Input = InputStream<TcpStream>;
 type Output = OutputStream<TcpStream>;
 
-fn check_state<CT: HeloSeen>(server: &Server<CT>, container: &mut CT, input: &mut Input, output: &mut Output, line: &str, next: Next<CT>) {
+fn check_state<CT: HeloSeen>(config: &ServerConfig<CT>, container: &mut CT, input: &mut Input, output: &mut Output, line: &str, next: Next<CT>) {
     match container.helo_seen() {
         true => {
             output.write_line("503 Bad sequence of commands, HELO/EHLO already seen").unwrap();
         },
         false => {
-            next.unwrap().call(server, container, input, output, line);
+            next.unwrap().call(config, container, input, output, line);
         }
     }
 }
 
-fn check_domain<CT>(server: &Server<CT>, container: &mut CT, input: &mut Input, output: &mut Output, line: &str, next: Next<CT>) {
+fn check_domain<CT>(config: &ServerConfig<CT>, container: &mut CT, input: &mut Input, output: &mut Output, line: &str, next: Next<CT>) {
     match utils::get_domain(line) {
         None => {
             output.write_line("501 Domain name is invalid").unwrap();
@@ -48,18 +48,31 @@ fn check_domain<CT>(server: &Server<CT>, container: &mut CT, input: &mut Input, 
                     output.write_line("501 Domain name is invalid").unwrap();
                 },
                 true => {
-                    next.unwrap().call(server, container, input, output, line);
+                    next.unwrap().call(config, container, input, output, line);
                 }
             }
         }
     }
 }
 
-fn handle_domain<CT: HeloSeen + HeloHandler>(server: &Server<CT>, container: &mut CT, _: &mut Input, output: &mut Output, line: &str, _: Next<CT>) {
+fn handle_domain<CT: HeloSeen + HeloHandler>(config: &ServerConfig<CT>, container: &mut CT, _: &mut Input, output: &mut Output, line: &str, _: Next<CT>) {
     match container.handle_domain(line) {
         Ok(_) => {
             container.set_helo_seen(true);
-            output.write_line("250 OK").unwrap();
+            let mut i = config.extensions.len();
+            let host = if i > 0 {
+                format!("250-{}", config.hostname)
+            } else {
+                format!("250 {}", config.hostname)
+            };
+            output.write_line(host.as_slice()).unwrap();
+            while i != 1 {
+                output.write_line(format!("250-{}", config.extensions[i - 1]).as_slice()).unwrap();
+                i -= 1;
+            }
+            if (i == 1) {
+                output.write_line(format!("250 {}", config.extensions[i - 1]).as_slice()).unwrap();
+            }
         },
         Err(_) => {
             output.write_line("550 Domain not taken").unwrap();

@@ -23,6 +23,8 @@ use std::old_io::net::ip::{SocketAddr, IpAddr, Port};
 use std::old_io::{Acceptor, Listener, IoResult};
 use std::thread::Thread;
 use std::borrow::ToOwned;
+use std::sync::Arc;
+use std::ops::Deref;
 
 /// Core SMTP commands
 pub mod commands;
@@ -83,13 +85,13 @@ impl<CT, ST> Clone for NextMiddleware<CT, ST> {
 
 impl<CT, ST> NextMiddleware<CT, ST> {
     /// Call a command middleware.
-    pub fn call(&self, server: &Server<CT>, container: &mut CT, i: &mut InputStream<ST>, o: &mut OutputStream<ST>, l: &str) {
+    pub fn call(&self, config: &ServerConfig<CT>, container: &mut CT, i: &mut InputStream<ST>, o: &mut OutputStream<ST>, l: &str) {
         match *self.next {
             Some(ref next) => {
-                (self.callback)(server, container, i, o, l, Some(next.clone()));
+                (self.callback)(config, container, i, o, l, Some(next.clone()));
             },
             None => {
-                (self.callback)(server, container, i, o, l, None);
+                (self.callback)(config, container, i, o, l, None);
             }
         }
     }
@@ -97,7 +99,7 @@ impl<CT, ST> NextMiddleware<CT, ST> {
 
 /// A command middleware callback.
 pub type MiddlewareFn<CT, ST> = fn(
-    &Server<CT>,
+    &ServerConfig<CT>,
     &mut CT,
     &mut InputStream<ST>,
     &mut OutputStream<ST>,
@@ -168,14 +170,21 @@ impl<CT, ST> Command<CT, ST> {
     }
 }
 
-/// An SMTP server, with no commands by default.
-pub struct Server<CT> {
+/// An SMTP server configuration.
+#[derive(Clone)]
+pub struct ServerConfig<CT> {
     hostname: String,
     max_recipients: usize,
     max_message_size: usize,
     max_command_line_size: usize,
     max_text_line_size: usize,
     commands: Vec<Command<CT, TcpStream>>,
+    extensions: Vec<String>
+}
+
+/// An SMTP server, with no commands by default.
+pub struct Server<CT> {
+    config: ServerConfig<CT>,
     container: CT
 }
 
@@ -196,21 +205,6 @@ pub type ServerResult<T> = Result<T, ServerError>;
 // TODO: logging, via a Trait on the container?
 // TODO: fatal error handling
 
-impl<CT: Send + Clone> Clone for Server<CT> {
-    /// Creates a new SMTP server from another SMTP server.
-    fn clone(&self) -> Server<CT> {
-        Server {
-            hostname: self.hostname.clone(),
-            max_recipients: self.max_recipients,
-            max_message_size: self.max_message_size,
-            max_command_line_size: self.max_command_line_size,
-            max_text_line_size: self.max_text_line_size,
-            commands: self.commands.clone(),
-            container: self.container.clone()
-        }
-    }
-}
-
 impl<CT: Send + Clone> Server<CT> {
     /// Creates a new SMTP server.
     ///
@@ -219,48 +213,58 @@ impl<CT: Send + Clone> Server<CT> {
     /// a logger and more.
     pub fn new(container: CT) -> Server<CT> {
         Server {
-            hostname: String::new(),
-            max_recipients: 100,
-            max_message_size: 65536,
-            max_command_line_size: 512,
-            max_text_line_size: 1000,
-            commands: Vec::with_capacity(16),
+            config: ServerConfig {
+                hostname: String::new(),
+                max_recipients: 100,
+                max_message_size: 65536,
+                max_command_line_size: 512,
+                max_text_line_size: 1000,
+                commands: Vec::with_capacity(16),
+                extensions: Vec::with_capacity(16)
+            },
             container: container
         }
     }
 
     fn set_hostname(&mut self, hostname: &str) {
-        self.hostname = hostname.to_owned();
+        self.config.hostname = hostname.to_owned();
     }
 
     fn set_max_recipients(&mut self, max: usize) {
         if max < 100 {
             panic!("Maximum number of recipients must be >= 100.");
         }
-        self.max_recipients = max;
+        self.config.max_recipients = max;
     }
 
     fn set_max_message_size(&mut self, max: usize) {
         if max < 65536 {
             panic!("Maximum message size must be >= 65536.");
         }
-        self.max_message_size = max;
+        self.config.max_message_size = max;
     }
 
     /// Adds a command to the server.
     pub fn add_command(&mut self, command: Command<CT, TcpStream>) {
-        self.commands.push(command);
+        self.config.commands.push(command);
     }
 
     // TODO: allow saying which extensions are supported by this server
     // for use in EHLO response.
 
     fn increase_max_command_line_size(&mut self, bytes: usize) {
-        self.max_command_line_size += bytes;
+        self.config.max_command_line_size += bytes;
     }
 
     fn increase_max_text_line_size(&mut self, bytes: usize) {
-        self.max_text_line_size += bytes;
+        self.config.max_text_line_size += bytes;
+    }
+
+    /// Marks an SMTP extension as "supported" by the server.
+    ///
+    /// This is used in the output of the EHLO command.
+    pub fn add_extension(&mut self, extension: &str) {
+        self.config.extensions.push(extension.to_owned());
     }
 
     fn get_hostname_from_system(&mut self) -> ServerResult<String> {
@@ -288,7 +292,7 @@ impl<CT: Send + Clone> Server<CT> {
         }
     }
 
-    fn handle_commands(server: &Server<CT>, input: &mut InputStream<TcpStream>, output: &mut OutputStream<TcpStream>, container: &mut CT, commands: &[Command<CT, TcpStream>]) {
+    fn handle_commands(config: &ServerConfig<CT>, input: &mut InputStream<TcpStream>, output: &mut OutputStream<TcpStream>, container: &mut CT) {
         'main: loop {
             let line = match input.read_line() {
                 Ok(buffer) => {
@@ -307,7 +311,7 @@ impl<CT: Send + Clone> Server<CT> {
             };
 
             // Find the right handler for this command line.
-            for command in commands.iter() {
+            for command in config.commands.iter() {
                 // The right command starts with whatever we have set
                 // when we created the command. We use unwrap here, but
                 // the commands are checked before the server starts
@@ -319,7 +323,7 @@ impl<CT: Send + Clone> Server<CT> {
                         if ls.starts_with(start.as_slice()) {
                             match command.front_middleware {
                                 Some(ref next) => {
-                                    next.call(server, container, input, output, &ls[start.len() ..]);
+                                    next.call(config, container, input, output, &ls[start.len() ..]);
                                 },
                                 None => {
                                     // TODO: improve error message
@@ -341,10 +345,9 @@ impl<CT: Send + Clone> Server<CT> {
         }
     }
 
-    fn handle_connection<'y>(&'y self, stream_res: IoResult<TcpStream>) {
+    fn handle_connection(&self, stream_res: IoResult<TcpStream>, config: &Arc<ServerConfig<CT>>) {
+        let config = config.clone();
         let mut container = self.container.clone();
-        let commands = self.commands.clone();
-        let server = self.clone();
         let thread = Thread::spawn(move || {
             match stream_res {
                 Ok(stream) => {
@@ -352,11 +355,10 @@ impl<CT: Send + Clone> Server<CT> {
                     let mut output = OutputStream::new(stream.clone(), false);
 
                     Server::<CT>::handle_commands(
-                        &server,
+                        config.deref(),
                         &mut input,
                         &mut output,
-                        &mut container,
-                        commands.as_slice()
+                        &mut container
                     );
                 },
                 Err(err) => {
@@ -369,10 +371,11 @@ impl<CT: Send + Clone> Server<CT> {
 
     /// Start the SMTP server on the given address and port.
     pub fn listen(&mut self, ip: IpAddr, port: Port) -> ServerResult<()> {
-        // TODO: check that commands all are valid
+        // TODO: check that commands all are valid, meaning they have at least
+        // a key word (ie HELO) and at least 1 middleware.
 
-        if self.hostname.len() == 0 {
-            self.hostname = try!(self.get_hostname_from_system());
+        if self.config.hostname.len() == 0 {
+            self.config.hostname = try!(self.get_hostname_from_system());
         }
 
         let address = SocketAddr {
@@ -384,10 +387,12 @@ impl<CT: Send + Clone> Server<CT> {
 
         let mut acceptor = try!(self.get_acceptor_for_listener(listener));
 
-        println!("Server '{}' listening on {}...", self.hostname, address);
+        println!("Server '{}' listening on {}...", self.config.hostname, address);
+
+        let config = Arc::new(self.config.clone());
 
         for conn in acceptor.incoming() {
-            self.handle_connection(conn);
+            self.handle_connection(conn, &config);
         }
 
         Ok(())

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::old_io::net::tcp::TcpStream;
-use super::super::Server;
+use super::super::ServerConfig;
 use super::super::super::common::mailbox::Mailbox;
 use super::super::super::common::stream::InputStream;
 use super::super::super::common::stream::OutputStream;
@@ -26,29 +26,29 @@ type Next<CT> = Option<NextMiddleware<CT, TcpStream>>;
 type Input = InputStream<TcpStream>;
 type Output = OutputStream<TcpStream>;
 
-fn check_state<CT: HeloSeen>(server: &Server<CT>, container: &mut CT, input: &mut Input, output: &mut Output, line: &str, next: Next<CT>) {
+fn check_state<CT: HeloSeen>(config: &ServerConfig<CT>, container: &mut CT, input: &mut Input, output: &mut Output, line: &str, next: Next<CT>) {
     match container.helo_seen() {
         false => {
             output.write_line("503 Bad sequence of commands, HELO/EHLO first").unwrap();
         },
         true => {
-            next.unwrap().call(server, container, input, output, line);
+            next.unwrap().call(config, container, input, output, line);
         }
     }
 }
 
-fn check_mailbox_format<CT>(server: &Server<CT>, container: &mut CT, input: &mut Input, output: &mut Output, line: &str, next: Next<CT>) {
+fn check_mailbox_format<CT>(config: &ServerConfig<CT>, container: &mut CT, input: &mut Input, output: &mut Output, line: &str, next: Next<CT>) {
     match line.len() < 2 || line.starts_with("<") || line.ends_with(">") {
         false => {
             output.write_line("501 Invalid argument, format: '<email@example.com>'").unwrap();
         },
         true => {
-            next.unwrap().call(server, container, input, output, line);
+            next.unwrap().call(config, container, input, output, line);
         }
     }
 }
 
-fn handle_no_sender<CT: MailHandler>(server: &Server<CT>, container: &mut CT, input: &mut Input, output: &mut Output, line: &str, next: Next<CT>) {
+fn handle_no_sender<CT: MailHandler>(config: &ServerConfig<CT>, container: &mut CT, input: &mut Input, output: &mut Output, line: &str, next: Next<CT>) {
     match line == "<>" {
         true => {
             match container.handle_sender_address(None) {
@@ -61,12 +61,12 @@ fn handle_no_sender<CT: MailHandler>(server: &Server<CT>, container: &mut CT, in
             }
         },
         false => {
-            next.unwrap().call(server, container, input, output, line);
+            next.unwrap().call(config, container, input, output, line);
         }
     }
 }
 
-fn handle_sender<CT: MailHandler>(server: &Server<CT>, container: &mut CT, _: &mut Input, output: &mut Output, line: &str, _: Next<CT>) {
+fn handle_sender<CT: MailHandler>(config: &ServerConfig<CT>, container: &mut CT, _: &mut Input, output: &mut Output, line: &str, _: Next<CT>) {
     match Mailbox::parse(&line[1 .. line.len() - 1]) {
         Err(err) => {
             output.write_line(format!("553 Email address invalid: {:?}", err).as_slice()).unwrap();
