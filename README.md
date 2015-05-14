@@ -10,6 +10,8 @@ iterate on ideas together.
 
 **This project is very much a work in progress. I'm planning on releasing a `v1 beta` at about the same time Rust reaches `v1` and stricly respect SemVer from there. Until then, I'll be making breaking changes from time to time.**
 
+**EDIT 15.05.2015: Rust stable v1 is coming today. I am currently working on getting a new release of Rustatic SMTP that works with Rust v1. Might take a bit of time though.**
+
 # Example
 
 To help you get started and showcase `rsmtp` in action, we have built an [example SMTP server](https://github.com/conradkleinespel/rustastic-smtp-test-server/blob/master/src/main.rs).
