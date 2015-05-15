@@ -14,14 +14,20 @@
 
 //! Tools for reading/writing from SMTP clients to SMTP servers and vice-versa.
 
-use std::old_io::{Reader, Writer, IoResult, IoError, InvalidInput};
+use std::io::{Read, Write, ErrorKind};
+use std::io::Result as IoResult;
+use std::io::Error as IoError;
 use std::vec::Vec;
-#[allow(unused_imports)]
-use std::old_io::{Truncate, Open, Read, Write};
-#[allow(unused_imports)]
-use std::old_io::fs::File;
-#[allow(unused_imports)]
+use std::fs::File;
+use std::ops::{RangeFrom, IndexMut};
+#[cfg(test)]
+use std::error::Error;
+#[cfg(test)]
+use std::fs::OpenOptions;
+#[cfg(test)]
 use super::{MIN_ALLOWED_LINE_SIZE};
+#[cfg(test)]
+use std::iter::{FromIterator, repeat};
 
 pub static LINE_TOO_LONG: &'static str = "line too long";
 pub static DATA_TOO_LONG: &'static str = "message too long";
@@ -35,7 +41,7 @@ fn test_static_vars() {
 ///
 /// # Example
 /// ```no_run
-/// use std::old_io::TcpStream;
+/// use std::io::TcpStream;
 /// use rsmtp::common::stream::InputStream;
 /// use rsmtp::common::{
 ///     MIN_ALLOWED_LINE_SIZE,
@@ -96,7 +102,7 @@ fn position_crlf(buf: &[u8]) -> Option<usize> {
     None
 }
 
-impl<S: Reader> InputStream<S> {
+impl<S: Read> InputStream<S> {
     /// Create a new `InputStream` from another stream.
     pub fn new(inner: S, max_line_size: usize, debug: bool) -> InputStream<S> {
         InputStream {
@@ -118,7 +124,7 @@ impl<S: Reader> InputStream<S> {
             Some(p) => {
                 // TODO: This could probably be optimised by shifting bytes instead
                 // of re-allocating.
-                self.buf = self.buf.as_slice()[p + 2 ..].to_vec();
+                self.buf = self.buf[p + 2 ..].to_vec();
                 self.buf.reserve(self.max_line_size);
             },
             _ => {}
@@ -133,7 +139,9 @@ impl<S: Reader> InputStream<S> {
         let cap = self.buf.capacity();
 
         // Read as much data as the buffer can hold without re-allocation.
-        let res = self.stream.push(cap - len, &mut self.buf);
+        let res = self.stream.read(self.buf.index_mut(RangeFrom {
+            start: self.buf.len()
+        }));
 
         res
     }
@@ -143,7 +151,7 @@ impl<S: Reader> InputStream<S> {
         // Remove the previous line from the buffer before reading a new one.
         self.move_buf();
 
-        let read_line = match position_crlf(self.buf.as_slice()) {
+        let read_line = match position_crlf(self.buf.as_ref()) {
             // First, let's check if the buffer already contains a line. This
             // reduces the number of syscalls.
             Some(last_crlf) => {
@@ -156,7 +164,7 @@ impl<S: Reader> InputStream<S> {
             None => {
                 match self.fill_buf() {
                     Ok(_) => {
-                        match position_crlf(self.buf.as_slice()) {
+                        match position_crlf(self.buf.as_ref()) {
                             Some(last_crlf) => {
                                 let s = &self.buf[.. last_crlf];
                                 self.last_crlf = Some(last_crlf);
@@ -166,11 +174,7 @@ impl<S: Reader> InputStream<S> {
                                 // If we didn't find a line, it means we had
                                 // no `<CRLF>` in the buffer, which means that
                                 // the line is too long.
-                                Err(IoError {
-                                    kind: InvalidInput,
-                                    desc: LINE_TOO_LONG,
-                                    detail: None
-                                })
+                                Err(IoError::new(ErrorKind::InvalidInput, LINE_TOO_LONG))
                             }
                         }
                     },
@@ -185,7 +189,7 @@ impl<S: Reader> InputStream<S> {
         match read_line {
             Ok(bytes) => {
                 if self.debug {
-                    println!("rsmtp: imsg: {}", String::from_utf8_lossy(bytes.as_slice()));
+                    println!("rsmtp: imsg: {}", String::from_utf8_lossy(bytes.as_ref()));
                 }
             },
             _ => {}
@@ -203,7 +207,7 @@ pub struct OutputStream<S> {
     debug: bool,
 }
 
-impl<S: Writer> OutputStream<S> {
+impl<S: Write> OutputStream<S> {
     /// Create a new `InputStream` from another stream.
     pub fn new(inner: S, debug: bool) -> OutputStream<S> {
         OutputStream {
@@ -221,7 +225,7 @@ impl<S: Writer> OutputStream<S> {
         // the amount of syscalls and to send the string as a single packet.
         // I'm not sure if this is the right way to go though. If you think
         // this is wrong, please open a issue on Github.
-        self.stream.write_str(format!("{}\r\n", s).as_slice())
+        write!(&mut self.stream, "{}\r\n", s)
     }
 }
 
@@ -234,97 +238,89 @@ fn test_new() {
 fn test_write_line() {
     // Use a block so the file gets closed at the end of it.
     {
-        let mut path_write: Path;
         let mut file_write: File;
         let mut stream: OutputStream<File>;
 
-        path_write = Path::new("tests/stream/write_line");
-        file_write = File::open_mode(&path_write, Truncate, Write).unwrap();
+        file_write = OpenOptions::new()
+            .truncate(true).write(true)
+            .open("tests/stream/write_line")
+            .unwrap();
         stream = OutputStream::new(file_write, false);
         stream.write_line("HelloWorld").unwrap();
         stream.write_line("ByeBye").unwrap();
     }
-    let mut path_read: Path;
     let mut file_read: File;
     let mut expected: String;
 
-    path_read = Path::new("tests/stream/write_line");
-    file_read = File::open_mode(&path_read, Open, Read).unwrap();
-    expected = file_read.read_to_string().unwrap();
-    assert_eq!("HelloWorld\r\nByeBye\r\n", expected.as_slice());
+    file_read = OpenOptions::new()
+        .read(true)
+        .open("tests/stream/write_line")
+        .unwrap();
+    file_read.read_to_string(&mut expected).unwrap();
+    assert_eq!("HelloWorld\r\nByeBye\r\n", expected.as_str());
 }
 
 #[test]
 fn test_limits() {
-    let mut path: Path;
     let mut file: File;
     let mut stream: InputStream<File>;
 
-    path = Path::new("tests/stream/1line1");
-    file = File::open(&path).unwrap();
+    file = OpenOptions::new().read(true).open("tests/stream/1line1").unwrap();
     stream = InputStream::new(file, 3, false);
     match stream.read_line() {
         Ok(_) => panic!(),
         Err(err) => {
-            assert_eq!("line too long", err.desc);
-            assert_eq!(InvalidInput, err.kind);
+            assert_eq!("line too long", err.description());
+            assert_eq!(ErrorKind::InvalidInput, err.kind());
         }
     }
 }
 
 #[test]
 fn test_read_line() {
-    let mut path: Path;
     let mut file: File;
     let mut stream: InputStream<File>;
     let mut expected: String;
 
-    path = Path::new("tests/stream/0line1");
-    file = File::open(&path).unwrap();
+    file = OpenOptions::new().read(true).open("tests/stream/0line1").unwrap();
     stream = InputStream::new(file, MIN_ALLOWED_LINE_SIZE, false);
     assert!(!stream.read_line().is_ok());
 
-    path = Path::new("tests/stream/0line2");
-    file = File::open(&path).unwrap();
+    file = OpenOptions::new().read(true).open("tests/stream/0line2").unwrap();
     stream = InputStream::new(file, MIN_ALLOWED_LINE_SIZE, false);
     assert!(!stream.read_line().is_ok());
 
-    path = Path::new("tests/stream/0line3");
-    file = File::open(&path).unwrap();
+    file = OpenOptions::new().read(true).open("tests/stream/0line3").unwrap();
     stream = InputStream::new(file, MIN_ALLOWED_LINE_SIZE, false);
     assert!(!stream.read_line().is_ok());
 
-    path = Path::new("tests/stream/1line1");
-    file = File::open(&path).unwrap();
+    file = OpenOptions::new().read(true).open("tests/stream/1line1").unwrap();
     stream = InputStream::new(file, MIN_ALLOWED_LINE_SIZE, false);
-    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).to_owned().as_slice(), "hello world!");
+    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_ref()).to_owned().as_ref(), "hello world!");
     assert!(!stream.read_line().is_ok());
 
-    path = Path::new("tests/stream/1line2");
-    file = File::open(&path).unwrap();
+    file = OpenOptions::new().read(true).open("tests/stream/1line2").unwrap();
     stream = InputStream::new(file, MIN_ALLOWED_LINE_SIZE, false);
-    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).to_owned().as_slice(), "hello world!");
+    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_ref()).to_owned().as_ref(), "hello world!");
     assert!(!stream.read_line().is_ok());
 
-    path = Path::new("tests/stream/2lines1");
-    file = File::open(&path).unwrap();
+    file = OpenOptions::new().read(true).open("tests/stream/2lines1").unwrap();
     stream = InputStream::new(file, MIN_ALLOWED_LINE_SIZE, false);
-    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).to_owned().as_slice(), "hello world!");
-    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).to_owned().as_slice(), "bye bye world!");
+    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_ref()).to_owned().as_ref(), "hello world!");
+    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_ref()).to_owned().as_ref(), "bye bye world!");
     assert!(!stream.read_line().is_ok());
 
-    expected = String::from_char(62, 'x');
-    path = Path::new("tests/stream/xlines1");
-    file = File::open(&path).unwrap();
+    expected =  String::from_iter(repeat('x').take(62));
+    file = OpenOptions::new().read(true).open("tests/stream/xlines1").unwrap();
     stream = InputStream::new(file, MIN_ALLOWED_LINE_SIZE, false);
-    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).to_owned(), expected);
-    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).to_owned(), expected);
-    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).to_owned(), expected);
-    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).to_owned(), expected);
-    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).to_owned(), expected);
-    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).to_owned(), expected);
-    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).to_owned(), expected);
-    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).to_owned(), expected);
-    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_slice()).to_owned(), expected);
+    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_ref()).to_owned(), expected);
+    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_ref()).to_owned(), expected);
+    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_ref()).to_owned(), expected);
+    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_ref()).to_owned(), expected);
+    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_ref()).to_owned(), expected);
+    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_ref()).to_owned(), expected);
+    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_ref()).to_owned(), expected);
+    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_ref()).to_owned(), expected);
+    assert_eq!(String::from_utf8_lossy(stream.read_line().unwrap().as_ref()).to_owned(), expected);
     assert!(!stream.read_line().is_ok());
 }

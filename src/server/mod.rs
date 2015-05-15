@@ -18,13 +18,14 @@
 extern crate libc;
 
 use super::common::stream::{InputStream, OutputStream};
-use std::old_io::net::tcp::{TcpListener, TcpAcceptor, TcpStream};
-use std::old_io::net::ip::{SocketAddr, IpAddr, Port};
-use std::old_io::{Acceptor, Listener, IoResult};
-use std::thread::Thread;
+use std::net::tcp::{TcpListener, TcpStream};
+use std::net::{SocketAddr, IpAddr};
+use std::io::Result as IoResult;
+use std::thread;
 use std::borrow::ToOwned;
 use std::sync::Arc;
 use std::ops::Deref;
+use std::clone::Clone;
 
 /// Core SMTP commands
 pub mod commands;
@@ -60,7 +61,7 @@ fn rust_gethostname() -> Result<String, ()> {
                 i += 1;
             }
             unsafe { buf.set_len(real_len) }
-            Ok(String::from_utf8_lossy(buf.as_slice()).into_owned())
+            Ok(String::from_utf8_lossy(buf.as_ref()).into_owned())
         },
         _ => {
             Err(())
@@ -77,7 +78,7 @@ pub struct NextMiddleware<CT, ST> {
 impl<CT, ST> Clone for NextMiddleware<CT, ST> {
     fn clone(&self) -> NextMiddleware<CT, ST> {
         NextMiddleware {
-            callback: self.callback.clone(),
+            callback: self.callback,
             next: self.next.clone()
         }
     }
@@ -106,12 +107,6 @@ pub type MiddlewareFn<CT, ST> = fn(
     &str,
     Option<NextMiddleware<CT, ST>>
 ) -> ();
-
-impl<CT, ST> Clone for MiddlewareFn<CT, ST> {
-    fn clone(&self) -> MiddlewareFn<CT, ST> {
-        *self
-    }
-}
 
 /// An email server command.
 ///
@@ -278,17 +273,10 @@ impl<CT: Send + Clone> Server<CT> {
         }
     }
 
-    fn get_listener_for_address(&mut self, address: SocketAddr) -> ServerResult<TcpListener> {
+    fn get_listener_for_address(&mut self, address: (IpAddr, u16)) -> ServerResult<TcpListener> {
         match TcpListener::bind(address) {
             Ok(listener) => Ok(listener),
             Err(_) => Err(ServerError::Bind)
-        }
-    }
-
-    fn get_acceptor_for_listener(&mut self, listener: TcpListener) -> ServerResult<TcpAcceptor> {
-        match listener.listen() {
-            Ok(acceptor) => Ok(acceptor),
-            Err(_) => Err(ServerError::Listen)
         }
     }
 
@@ -318,9 +306,9 @@ impl<CT: Send + Clone> Server<CT> {
                 // so this is always OK.
                 match command.start {
                     Some(ref start) => {
-                        let ls = line.as_slice();
+                        let ls = line.as_str();
                         // TODO: make this case insensitive
-                        if ls.starts_with(start.as_slice()) {
+                        if ls.starts_with(start.as_str()) {
                             match command.front_middleware {
                                 Some(ref next) => {
                                     next.call(config, container, input, output, &ls[start.len() ..]);
@@ -348,7 +336,7 @@ impl<CT: Send + Clone> Server<CT> {
     fn handle_connection(&self, stream_res: IoResult<TcpStream>, config: &Arc<ServerConfig<CT>>) {
         let config = config.clone();
         let mut container = self.container.clone();
-        let thread = Thread::spawn(move || {
+        let thread_handle = thread::spawn(move || {
             match stream_res {
                 Ok(stream) => {
                     let mut input = InputStream::new(stream.clone(), 1000, false);
@@ -366,11 +354,11 @@ impl<CT: Send + Clone> Server<CT> {
                 }
             }
         });
-        println!("Connection being handled in thread: {:?}", thread.name());
+        println!("Connection being handled in thread: {:?}", thread_handle.thread().name());
     }
 
     /// Start the SMTP server on the given address and port.
-    pub fn listen(&mut self, ip: IpAddr, port: Port) -> ServerResult<()> {
+    pub fn listen(&mut self, ip: IpAddr, port: u16) -> ServerResult<()> {
         // TODO: check that commands all are valid, meaning they have at least
         // a key word (ie HELO) and at least 1 middleware.
 
@@ -378,20 +366,13 @@ impl<CT: Send + Clone> Server<CT> {
             self.config.hostname = try!(self.get_hostname_from_system());
         }
 
-        let address = SocketAddr {
-            ip: ip,
-            port: port
-        };
+        let listener = try!(self.get_listener_for_address((ip, port)));
 
-        let listener = try!(self.get_listener_for_address(address));
-
-        let mut acceptor = try!(self.get_acceptor_for_listener(listener));
-
-        println!("Server '{}' listening on {}...", self.config.hostname, address);
+        println!("Server '{}' listening on {}:{}...", self.config.hostname, ip, port);
 
         let config = Arc::new(self.config.clone());
 
-        for conn in acceptor.incoming() {
+        for conn in listener.incoming() {
             self.handle_connection(conn, &config);
         }
 

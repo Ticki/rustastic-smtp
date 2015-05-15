@@ -16,10 +16,11 @@
 
 use std::string::String;
 use super::utils;
-use std::old_io::net::ip::IpAddr;
+use std::net::ip::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::ascii::OwnedAsciiExt;
 use std::ascii::AsciiExt;
 use std::borrow::ToOwned;
+use std::iter::{FromIterator, repeat};
 
 /// Maximum length of the local part.
 static MAX_MAILBOX_LOCAL_PART_LEN: usize = 64;
@@ -66,8 +67,8 @@ pub enum MailboxForeignPart {
 fn test_foreign_part() {
     let domain_text = "rustastic.org";
     let domain = MailboxForeignPart::Domain(domain_text.to_owned());
-    let ipv4 = MailboxForeignPart::IpAddr(IpAddr::Ipv4Addr(127, 0, 0, 1));
-    let ipv6 = MailboxForeignPart::IpAddr(IpAddr::Ipv6Addr(1, 1, 1, 1, 1, 1, 1, 1));
+    let ipv4 = MailboxForeignPart::IpAddr(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
+    let ipv6 = MailboxForeignPart::IpAddr(IpAddr::V6(Ipv6Addr::new(1, 1, 1, 1, 1, 1, 1, 1)));
 
     assert!(domain == domain);
     assert!(domain != MailboxForeignPart::Domain(domain_text.to_owned() + "bullshit"));
@@ -184,7 +185,7 @@ impl Mailbox {
             // The special "Postmaster" address must be handled differently.
             // It is ASCII for sure, and since `into_ascii_lower` may panic for
             // non ascii strings, we make this check first.
-            if local_part.as_slice().is_ascii() {
+            if local_part.as_str().is_ascii() {
                 // We make this special address lowercase so the server can
                 // avoid to check this again. Basically, we're saying that if
                 // the email is sent by or to Postmaster, we know that the email
@@ -200,7 +201,7 @@ impl Mailbox {
                 //
                 // RFC 5336: https://tools.ietf.org/html/rfc5336
                 let local_part_c = local_part.clone().into_ascii_lowercase();
-                if local_part_c.as_slice() == "postmaster" {
+                if local_part_c.as_str() == "postmaster" {
                     local_part = "postmaster".to_owned();
                 }
             }
@@ -214,12 +215,12 @@ impl Mailbox {
 
 #[test]
 fn test_mailbox() {
-    let mut s = String::from_char(MAX_MAILBOX_LOCAL_PART_LEN, 'a');
+    let mut s = String::from_iter(repeat('a').take(MAX_MAILBOX_LOCAL_PART_LEN));
     s.push_str("@t.com");
-    assert!(Mailbox::parse(s.as_slice()).is_ok());
-    let mut s = String::from_char(MAX_MAILBOX_LOCAL_PART_LEN + 1, 'a');
+    assert!(Mailbox::parse(s.as_ref()).is_ok());
+    let mut s = String::from_iter(repeat('a').take(MAX_MAILBOX_LOCAL_PART_LEN + 1));
     s.push_str("@t.com");
-    assert_eq!(Err(MailboxParseError::LocalPartTooLong), Mailbox::parse(s.as_slice()));
+    assert_eq!(Err(MailboxParseError::LocalPartTooLong), Mailbox::parse(s.as_ref()));
     assert_eq!(Err(MailboxParseError::LocalPartUnrecognized), Mailbox::parse("t @t.com{"));
     assert_eq!(Err(MailboxParseError::LocalPartUnrecognized), Mailbox::parse("t "));
     assert_eq!(Err(MailboxParseError::ForeignPartUnrecognized), Mailbox::parse("t@{}"));
@@ -227,20 +228,20 @@ fn test_mailbox() {
 
     // The check here is to expect something else than DomainTooLong.
     assert_eq!(Err(MailboxParseError::TooLong), Mailbox::parse(
-        ("rust@".to_owned() + String::from_char(MAX_DOMAIN_LEN, 'a'))
-            .as_slice()
+        ("rust@".to_owned() + String::from_iter(repeat('a').take(MAX_DOMAIN_LEN)).as_ref())
+            .as_ref()
     ));
     assert_eq!(Err(MailboxParseError::DomainTooLong), Mailbox::parse(
-        ("rust@".to_owned() + String::from_char(MAX_DOMAIN_LEN + 1, 'a'))
-            .as_slice()
+        ("rust@".to_owned() + String::from_iter(repeat('a').take(MAX_DOMAIN_LEN + 1)).as_ref())
+            .as_ref()
     ));
     assert!(Mailbox::parse(
-        ("rust@".to_owned() + String::from_char(MAX_MAILBOX_LEN - 5, 'a'))
-            .as_slice()
+        ("rust@".to_owned() + String::from_iter(repeat('a').take(MAX_MAILBOX_LEN - 5)).as_ref())
+            .as_ref()
     ).is_ok());
     assert_eq!(Err(MailboxParseError::TooLong), Mailbox::parse(
-        ("rust@".to_owned() + String::from_char(MAX_MAILBOX_LEN - 4, 'a'))
-            .as_slice()
+        ("rust@".to_owned() + String::from_iter(repeat('a').take(MAX_MAILBOX_LEN - 4)).as_ref())
+            .as_ref()
     ));
 
     // Check some common error cases.
@@ -259,29 +260,29 @@ fn test_mailbox() {
     assert!(path_1 == path_1.clone());
     assert!(path_2 == path_2.clone());
     assert!(path_1 != path_2);
-    assert_eq!(path_3.local_part.as_slice(), "\"hello\"");
+    assert_eq!(path_3.local_part.as_ref(), "\"hello\"");
     assert_eq!(path_3.foreign_part, MailboxForeignPart::Domain("rust".to_owned()));
 
     // Check that parsing of IP addresses is done right.
     let path_4 = Mailbox::parse("rust.is@[127.0.0.1]").unwrap();
     assert_eq!(path_4.foreign_part, MailboxForeignPart::IpAddr(
-        IpAddr::Ipv4Addr(127, 0, 0, 1)
+        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))
     ));
 
     let path_5 = Mailbox::parse("rust.is@[Ipv6:::1]").unwrap();
     assert_eq!(path_5.foreign_part, MailboxForeignPart::IpAddr(
-        IpAddr::Ipv6Addr(0, 0, 0, 0, 0, 0, 0, 1)
+        IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1))
     ));
 
     let path_6 = Mailbox::parse("rust.is@[Ipv6:2001:db8::ff00:42:8329]").unwrap();
     assert_eq!(path_6.foreign_part, MailboxForeignPart::IpAddr(
-        IpAddr::Ipv6Addr(0x2001, 0xdb8, 0x0, 0x0, 0x0, 0xff00, 0x42, 0x8329)
+        IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0x0, 0x0, 0x0, 0xff00, 0x42, 0x8329))
     ));
 
     // Make sure that the special postmaster address is always lowercase.
     let path_7 = Mailbox::parse("PosTMAster@ok").unwrap();
-    assert_eq!("postmaster", path_7.local_part.as_slice());
+    assert_eq!("postmaster", path_7.local_part.as_ref());
 
     let path_8 = Mailbox::parse("postmaster@ok").unwrap();
-    assert_eq!("postmaster", path_8.local_part.as_slice());
+    assert_eq!("postmaster", path_8.local_part.as_ref());
 }

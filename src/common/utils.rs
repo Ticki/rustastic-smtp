@@ -14,8 +14,9 @@
 
 //! Utility functions used in SMTP clients and SMTP servers.
 
-use std::old_io::net::ip::IpAddr;
+use std::net::ip::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::str::FromStr;
+use std::net::AddrParseError;
 
 /// Returns the length of the longest subdomain found at the beginning
 /// of the passed string.
@@ -510,7 +511,10 @@ pub fn get_mailbox_ip(s: &str) -> Option<(&str, IpAddr)> {
         ];
 
         // Try to parse the IP address.
-        FromStr::from_str(stripped_ip).map(|addr| (ip, addr))
+        let res: Result<IpAddr, AddrParseError> = FromStr::from_str(stripped_ip);
+
+        // Turn the result into an Option.
+        res.map(|addr| (ip, addr)).ok()
     }).or(get_possible_mailbox_ipv6(s).and_then(|ip| {
         // The IP without prefix / suffix.
         let stripped_ip = &s[
@@ -521,21 +525,24 @@ pub fn get_mailbox_ip(s: &str) -> Option<(&str, IpAddr)> {
         ];
 
         // Try to parse the IP address.
-        FromStr::from_str(stripped_ip).map(|addr| (ip, addr))
-    }))
+        let res: Result<IpAddr, AddrParseError> = FromStr::from_str(stripped_ip);
+
+        // Turn the result into an Option.
+        res.map(|addr| (ip, addr)).ok()
+    }));
 }
 
 #[test]
 fn test_get_possible_mailbox() {
     // IPv6
     assert_eq!(
-        Some(("[Ipv6:::1]", IpAddr::Ipv6Addr(0, 0, 0, 0, 0, 0, 0, 1))),
+        Some(("[Ipv6:::1]", IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1)))),
         get_mailbox_ip("[Ipv6:::1]")
     );
 
     // IPv4
     assert_eq!(
-        Some(("[127.0.0.1]", IpAddr::Ipv4Addr(127, 0, 0, 1))),
+        Some(("[127.0.0.1]", IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)))),
         get_mailbox_ip("[127.0.0.1]")
     );
 
