@@ -32,7 +32,7 @@ use std::os::unix::io::{FromRawFd, AsRawFd};
 pub mod commands;
 
 extern {
-    pub fn gethostname(name: *mut libc::c_char, size: libc::size_t) -> libc::c_int;
+    fn gethostname(name: *mut libc::c_char, size: libc::size_t) -> libc::c_int;
 }
 
 fn rust_gethostname() -> Result<String, ()> {
