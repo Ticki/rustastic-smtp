@@ -42,7 +42,7 @@ fn test_static_vars() {
 ///
 /// # Example
 /// ```no_run
-/// use std::io::TcpStream;
+/// use std::net::TcpStream;
 /// use rsmtp::common::stream::InputStream;
 /// use rsmtp::common::{
 ///     MIN_ALLOWED_LINE_SIZE,
@@ -54,7 +54,7 @@ fn test_static_vars() {
 ///     false
 /// );
 ///
-/// println!("{}", smtp.read_line().unwrap());
+/// println!("{:?}", smtp.read_line().unwrap());
 /// ```
 pub struct InputStream<S> {
     /// Underlying stream
@@ -139,6 +139,8 @@ impl<S: Read> InputStream<S> {
         let len = self.buf.len();
         let cap = self.buf.capacity();
 
+        // Leave as much space open at the end of the buffer so we can fill it using
+        // a &mut reference. We'll set the right length again later.
         unsafe { self.buf.set_len(cap) };
 
         // Read as much data as the buffer can hold without re-allocation.
@@ -146,10 +148,12 @@ impl<S: Read> InputStream<S> {
             start: len
         })) {
             Ok(num_bytes) => {
+                // Set the new known length for the buffer.
                 unsafe { self.buf.set_len(len + num_bytes) };
                 Ok(num_bytes)
             },
             Err(err) => {
+                // Restore the previous length so we don't accidentally use outdated bytes.
                 unsafe { self.buf.set_len(len) };
                 Err(err)
             }
@@ -196,13 +200,10 @@ impl<S: Read> InputStream<S> {
         };
 
         // If we read a line, we'll say so in the console, if debug mode is on.
-        match read_line {
-            Ok(bytes) => {
-                if self.debug {
-                    println!("rsmtp: imsg: {}", String::from_utf8_lossy(bytes.as_ref()));
-                }
-            },
-            _ => {}
+        if let Ok(bytes) = read_line {
+            if self.debug {
+                println!("rsmtp: imsg: {}", String::from_utf8_lossy(bytes.as_ref()));
+            }
         }
 
         read_line

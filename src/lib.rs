@@ -21,41 +21,61 @@
 //! # Example
 //!
 //! ```no_run
+//! #![feature(ip_addr)]
+//!
 //! extern crate rsmtp;
 //!
-//! use rsmtp::server::{SmtpServer, SmtpServerEventHandler, SmtpServerConfig};
-//! use rsmtp::common::mailbox::Mailbox;
-//! use rsmtp::common::{
-//!     MIN_ALLOWED_MESSAGE_SIZE,
-//!     MIN_ALLOWED_LINE_SIZE,
-//!     MIN_ALLOWED_RECIPIENTS
-//! };
-//! use std::net::ip::IpAddr;
+//! use std::net::{IpAddr, Ipv4Addr};
+//! use rsmtp::server::Server;
+//! use rsmtp::server::commands::HeloSeen;
+//! use rsmtp::server::commands::HeloHandler;
+//! use rsmtp::server::commands::helo::get as get_helo_command;
 //!
 //! #[derive(Clone)]
-//! struct Handler;
+//! struct Container {
+//!     helo_seen: bool
+//! }
 //!
-//! impl SmtpServerEventHandler for Handler {
-//!     fn handle_connection(&mut self, client_ip: &IpAddr) -> Result<(), ()> {
-//!         Ok(())
+//! impl Container {
+//!     fn new() -> Container {
+//!         Container {
+//!             helo_seen: false
+//!         }
 //!     }
-//!     fn handle_sender_address(&mut self, mailbox: Option<&Mailbox>) -> Result<(), ()> {
+//! }
+//!
+//! impl HeloSeen for Container {
+//!     fn helo_seen(&mut self) -> bool {
+//!         self.helo_seen
+//!     }
+//!
+//!     fn set_helo_seen(&mut self, helo_seen: bool) {
+//!         self.helo_seen = helo_seen;
+//!     }
+//! }
+//!
+//! impl HeloHandler for Container {
+//!     fn handle_domain(&mut self, domain: &str) -> Result<(), ()> {
+//!         println!("Got a client from domain: {:?}", domain);
 //!         Ok(())
 //!     }
 //! }
 //!
 //! fn main() {
-//!     let config = SmtpServerConfig {
-//!         ip: "0.0.0.0",
-//!         domain: "rustastic.org",
-//!         port: 25,
-//!         max_recipients: MIN_ALLOWED_RECIPIENTS,
-//!         max_message_size: MIN_ALLOWED_MESSAGE_SIZE,
-//!         max_line_size: MIN_ALLOWED_LINE_SIZE,
-//!         debug: true
-//!     };
-//!     let mut server = SmtpServer::new(config, Handler).unwrap();
-//!     server.run();
+//!     let container = Container::new();
+//!     let mut server = Server::new(container);
+//!
+//!     // Just one command for the example, but you can add more.
+//!     // Look in `rsmtp::server::commands` for more commands.
+//!     server.add_command(get_helo_command());
+//!
+//!     // Hypothetical extension support.
+//!     server.add_extension("STARTTLS");
+//!     server.add_extension("BDAT");
+//!
+//!     if let Err(_) = server.listen(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 2525) {
+//!         println!("Error.");
+//!     }
 //! }
 //! ```
 
@@ -68,7 +88,7 @@
 #![feature(convert)]
 #![feature(str_char)]
 #![feature(std_misc)]
- 
+
 pub mod client;
 pub mod common;
 pub mod server;
