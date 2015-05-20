@@ -1,31 +1,15 @@
 # Rustastic SMTP
 
 Rustastic SMTP is meant to provide SMTP tools such as email address parsing
-utilities as well as a configurable SMTP server and client.
-
-The goal is to eventually comply with the
+utilities as well as a configurable SMTP server and client. The goal is to eventually comply with the
 [SMTP spec from RFC 5321](http://tools.ietf.org/html/rfc5321).
-If you would like to get involved, feel free to create an issue so we can discuss publicly and
-iterate on ideas together.
 
-**This project is very much a work in progress. I'm planning on releasing a `v1 beta` at about the same time Rust reaches `v1` and stricly respect SemVer from there. Until then, I'll be making breaking changes from time to time.**
-
-**EDIT 15.05.2015: Rust stable v1 is coming today. I am currently working on getting a new release of Rustatic SMTP that works with Rust v1. Might take a bit of time though.**
+**THIS PACKAGE IS CURRENTLY UNSTABLE.**
 
 # Example
 
-To help you get started and showcase `rsmtp` in action, we have built an [example SMTP server](https://github.com/conradkleinespel/rustastic-smtp-test-server/blob/master/src/main.rs).
-
-If you want to easily build and run the example SMTP server, you can do that by running the following commands in your terminal:
-```shell
-git clone https://github.com/conradkleinespel/rustastic-smtp-test-server.git
-cd rustastic-smtp-test-server
-cargo build
-sudo ./target/smtp-test-server
-```
-
-Note that admin rights are needed to run the server because the default port to listen on is below 1024. If you change the
-server's port in the `src/main.rs` file to something like `2525`, you should not need admin rights anymore.
+To help you get started and showcase `rsmtp` in action, we have built an
+[example SMTP server](https://github.com/conradkleinespel/rustastic-smtp-test-server).
 
 # Documentation
 
@@ -43,8 +27,8 @@ Then, open the file `target/doc/rsmtp/index.html` in your browser of choice.
 
 # Running tests
 
-This project is linked with [rust-ci](http://rust-ci.org/conradkleinespel/rustastic-smtp) where
-you can see the latest build status.
+This project is linked with [rust-ci](http://rust-ci.org/conradkleinespel/rustastic-smtp)
+where you can see the latest build status.
 
 If you would like to run the tests yourself, here's how to do that, using
 [Cargo](http://crates.io/):

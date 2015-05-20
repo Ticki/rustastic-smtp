@@ -16,21 +16,26 @@
 
 use std::string::String;
 use super::utils;
-use std::io::net::ip;
-use std::str::FromStr;
+use std::net::IpAddr;
 use std::ascii::OwnedAsciiExt;
+use std::ascii::AsciiExt;
+use std::borrow::ToOwned;
+#[cfg(test)]
+use std::iter::{FromIterator, repeat};
+#[cfg(test)]
+use std::net::{Ipv4Addr, Ipv6Addr};
 
 /// Maximum length of the local part.
-static MAX_MAILBOX_LOCAL_PART_LEN: uint = 64;
+static MAX_MAILBOX_LOCAL_PART_LEN: usize = 64;
 
 /// Maximum length of an email address.
 ///
 /// The RFC doesn't actually specify 254 chars, but it does say that a reverse path starts with
 /// "<", ends with ">" and including those symbols has a maximum length of 256.
-static MAX_MAILBOX_LEN: uint = 254;
+static MAX_MAILBOX_LEN: usize = 254;
 
 /// Maximum length of a domain name.
-static MAX_DOMAIN_LEN: uint = 255;
+static MAX_DOMAIN_LEN: usize = 255;
 
 #[test]
 fn test_static_vars() {
@@ -39,93 +44,37 @@ fn test_static_vars() {
     assert_eq!(255, MAX_DOMAIN_LEN);
 }
 
-/// Represents the local part of an email address, aka the username.
-#[deriving(PartialEq, Eq, Clone, Show)]
-pub struct MailboxLocalPart {
-    /// This is a version of the local part for use in the SMTP protocol.
-    ///
-    /// This is either a dot-string or a quoted-string, whatever is shortest as
-    /// recommended in RFC 5321.
-    smtp_string: String,
-    /// This is a version of the local part that is completely unescaped.
-    ///
-    /// It is human readable but not suitable for use in SMTP.
-    human_string: String
-}
-
-impl MailboxLocalPart {
-    /// Create a local part from a dot-string.
-    fn from_dot_string(dot_string: &str) -> MailboxLocalPart {
-        MailboxLocalPart {
-            human_string: dot_string.into_string(),
-            smtp_string: dot_string.into_string()
-        }
-    }
-
-    /// Create a local part from a quoted-string.
-    ///
-    /// Since a quoted-string can sometimes be simplified, this function tries to simplify it
-    /// as much as possible.
-    fn from_quoted_string(quoted_string: &str) -> MailboxLocalPart {
-        MailboxLocalPart {
-            human_string: utils::unescape_quoted_string(quoted_string),
-            smtp_string: utils::simplify_quoted_string(quoted_string)
-        }
-    }
+fn get_mailbox_local_part(s: &str) -> Option<&str> {
+    utils::get_dot_string(s).or_else(|| utils::get_quoted_string(s))
 }
 
 #[test]
 fn test_local_part() {
-    let mut lp1: MailboxLocalPart;
-    let mut lp2: MailboxLocalPart;
-    let mut lp3: MailboxLocalPart;
-    let mut lp4: MailboxLocalPart;
-    let mut lp5: MailboxLocalPart;
-
-    lp1 = MailboxLocalPart::from_dot_string("rust.cool");
-    lp2 = MailboxLocalPart::from_quoted_string("\"rust \\a cool\"");
-    lp3 = MailboxLocalPart::from_quoted_string("\"rust.cool\"");
-    lp4 = MailboxLocalPart::from_quoted_string("\"rust.cool.\"");
-    lp5 = MailboxLocalPart::from_quoted_string("\"rust\\\\\\b\\;.c\\\"ool\"");
-
-    assert!(lp1.clone() == lp1.clone());
-    assert!(lp2.clone() == lp2.clone());
-    assert!(lp1.clone() != lp2.clone());
-
-    assert_eq!(lp1.smtp_string.as_slice(), "rust.cool");
-    assert_eq!(lp1.human_string.as_slice(), "rust.cool");
-
-    assert_eq!(lp2.smtp_string.as_slice(), "\"rust a cool\"");
-    assert_eq!(lp2.human_string.as_slice(), "rust a cool");
-
-    assert_eq!(lp3.smtp_string.as_slice(), "rust.cool");
-    assert_eq!(lp3.human_string.as_slice(), "rust.cool");
-
-    assert_eq!(lp4.smtp_string.as_slice(), "\"rust.cool.\"");
-    assert_eq!(lp4.human_string.as_slice(), "rust.cool.");
-
-    assert_eq!(lp5.smtp_string.as_slice(), "\"rust\\\\b;.c\\\"ool\"");
-    assert_eq!(lp5.human_string.as_slice(), "rust\\b;.c\"ool");
+    assert_eq!(Some("rust.cool"), get_mailbox_local_part("rust.cool"));
+    assert_eq!(Some("\"rust \\a cool\""), get_mailbox_local_part("\"rust \\a cool\""));
+    assert_eq!(Some("\"rust.cool\""), get_mailbox_local_part("\"rust.cool\""));
+    assert_eq!(Some("\"rust.cool.\""), get_mailbox_local_part("\"rust.cool.\""));
+    assert_eq!(Some("\"rust\\\\\\b\\;.c\\\"ool\""), get_mailbox_local_part("\"rust\\\\\\b\\;.c\\\"ool\""));
 }
 
 /// Represents the foreign part of an email address, aka the host.
-#[deriving(PartialEq, Eq, Clone, Show)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub enum MailboxForeignPart {
     /// The foreign part is a domain name.
     Domain(String),
     /// The foreign part is an ip address.
-    IpAddr(ip::IpAddr)
+    IpAddr(IpAddr)
 }
 
 #[test]
 fn test_foreign_part() {
     let domain_text = "rustastic.org";
-    let domain = MailboxForeignPart::Domain(domain_text.into_string());
-    let ipv4 = MailboxForeignPart::IpAddr(ip::Ipv4Addr(127, 0, 0, 1));
-    let ipv6 = MailboxForeignPart::IpAddr(ip::Ipv6Addr(1, 1, 1, 1, 1, 1, 1, 1));
+    let domain = MailboxForeignPart::Domain(domain_text.to_owned());
+    let ipv4 = MailboxForeignPart::IpAddr(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)));
+    let ipv6 = MailboxForeignPart::IpAddr(IpAddr::V6(Ipv6Addr::new(1, 1, 1, 1, 1, 1, 1, 1)));
 
     assert!(domain == domain);
-    assert!(domain != MailboxForeignPart::Domain(domain_text.into_string() + "bullshit"));
+    assert!(domain != MailboxForeignPart::Domain(domain_text.to_owned() + "bullshit"));
     assert!(domain != ipv4);
     assert!(domain != ipv6);
 }
@@ -135,14 +84,14 @@ fn test_foreign_part() {
 /// It is composed of a local part and a foreign part. If the address is sent to the `Postmaster`
 /// address for a domain, then the local part will always be converted `postmaster`, all lowercase.
 /// Since the `Postmaster` address must be handled without regard for case, this makes things simpler.
-#[deriving(PartialEq, Eq, Clone, Show)]
+#[derive(PartialEq, Eq, Clone, Debug)]
 pub struct Mailbox {
-    local_part: MailboxLocalPart,
+    local_part: String,
     foreign_part: MailboxForeignPart
 }
 
 /// Represents an error that occured while trying to parse an email address.
-#[deriving(PartialEq, Eq, Show)]
+#[derive(PartialEq, Eq, Clone, Debug, Copy)]
 pub enum MailboxParseError {
     /// The maximum length of 64 octets [as per RFC 5321](http://tools.ietf.org/html/rfc5321#section-4.5.3.1.1) is exceeded.
     LocalPartTooLong,
@@ -168,34 +117,24 @@ impl Mailbox {
     /// address. For example, this will result in an error:
     /// `<hello@world.com>`
     pub fn parse(s: &str) -> Result<Mailbox, MailboxParseError> {
-        let mut local_part: MailboxLocalPart;
+        let mut local_part: String;
         let mut foreign_part: MailboxForeignPart;
 
         // Skip the source routes as specified in RFC 5321.
-        let mut offset: uint = utils::get_source_route_len(s);
+        let mut offset = utils::get_source_route(s).map_or(0, |s| s.len());
 
         // Get the local part.
-        let dot_string_len = utils::get_dot_string_len(s.slice_from(offset));
-        if dot_string_len > 0 {
-            if dot_string_len > MAX_MAILBOX_LOCAL_PART_LEN {
-                return Err(MailboxParseError::LocalPartTooLong);
-            }
-            local_part = MailboxLocalPart::from_dot_string(
-                s.slice(offset, offset + dot_string_len)
-            );
-            offset += dot_string_len;
-        } else {
-            let quoted_string_len = utils::get_quoted_string_len(s.slice_from(offset));
-            if quoted_string_len == 0 {
+        match get_mailbox_local_part(&s[offset ..]) {
+            Some(lp) => {
+                if lp.len() > MAX_MAILBOX_LOCAL_PART_LEN {
+                    return Err(MailboxParseError::LocalPartTooLong);
+                }
+                local_part = lp.to_owned();
+                offset += lp.len();
+            },
+            None => {
                 return Err(MailboxParseError::LocalPartUnrecognized);
             }
-            if quoted_string_len > MAX_MAILBOX_LOCAL_PART_LEN {
-                return Err(MailboxParseError::LocalPartTooLong);
-            }
-            local_part = MailboxLocalPart::from_quoted_string(
-                s.slice(offset, offset + quoted_string_len)
-            );
-            offset += quoted_string_len;
         }
 
         // Check if the email address continues to find an @.
@@ -209,39 +148,27 @@ impl Mailbox {
         }
         offset += 1;
 
-        let domain_len = utils::get_domain_len(s.slice_from(offset));
-        if domain_len > 0 {
-            // Is the domain is too long ?
-            if domain_len > MAX_DOMAIN_LEN {
-                return Err(MailboxParseError::DomainTooLong);
-            }
-            // Save the domain.
-            foreign_part = MailboxForeignPart::Domain(
-                s.slice(offset, offset + domain_len).into_string()
-            );
-            offset += domain_len;
-        } else {
-            let ipv4_len = utils::get_possible_ipv4_len(s.slice_from(offset));
-            if ipv4_len > 0 {
-                match FromStr::from_str(s.slice(offset + 1, offset + ipv4_len - 1)) {
-                    Some(ip) => {
-                        foreign_part = MailboxForeignPart::IpAddr(ip);
-                        offset += ipv4_len;
-                    },
-                    _ => return Err(MailboxParseError::ForeignPartUnrecognized)
+        match utils::get_domain(&s[offset ..]) {
+            Some(d) => {
+                // Is the domain is too long ?
+                if d.len() > MAX_DOMAIN_LEN {
+                    return Err(MailboxParseError::DomainTooLong);
                 }
-            } else {
-                let ipv6_len = utils::get_possible_ipv6_len(s.slice_from(offset));
-                if ipv6_len > 0 {
-                    match FromStr::from_str(s.slice(offset + 6, offset + ipv6_len - 1)) {
-                        Some(ip) => {
-                            foreign_part = MailboxForeignPart::IpAddr(ip);
-                            offset += ipv6_len;
-                        },
-                        _ => return Err(MailboxParseError::ForeignPartUnrecognized)
+                // Save the domain.
+                foreign_part = MailboxForeignPart::Domain(
+                    s[offset .. offset + d.len()].to_owned()
+                );
+                offset += d.len();
+            },
+            None => {
+                match utils::get_mailbox_ip(&s[offset ..]) {
+                    Some((ip, addr)) => {
+                        foreign_part = MailboxForeignPart::IpAddr(addr);
+                        offset += ip.len();
+                    },
+                    None => {
+                        return Err(MailboxParseError::ForeignPartUnrecognized);
                     }
-                } else {
-                    return Err(MailboxParseError::ForeignPartUnrecognized);
                 }
             }
         }
@@ -258,9 +185,27 @@ impl Mailbox {
         } else if offset > MAX_MAILBOX_LEN {
             Err(MailboxParseError::TooLong)
         } else {
-            if local_part.human_string.is_ascii() {
-                if local_part.human_string.clone().into_ascii_lower().as_slice() == "postmaster" {
-                    local_part = MailboxLocalPart::from_dot_string("postmaster");
+            // The special "Postmaster" address must be handled differently.
+            // It is ASCII for sure, and since `into_ascii_lower` may panic for
+            // non ascii strings, we make this check first.
+            if local_part.as_str().is_ascii() {
+                // We make this special address lowercase so the server can
+                // avoid to check this again. Basically, we're saying that if
+                // the email is sent by or to Postmaster, we know that the email
+                // will be lowercase.
+                //
+                // We don't do this for other addresses though. Here's why:
+                // Imagine you want to build an email hosting service. You may
+                // want to allow your members to see the case that the person on
+                // the other end chose to give you. Also, handling low/up case
+                // with UTF8 strings is non trivial. Since SMTP allows non-ASCII
+                // mailboxes with RFC 5336, we'll let the case conversion up to
+                // the individual commands that a server wishes to implement.
+                //
+                // RFC 5336: https://tools.ietf.org/html/rfc5336
+                let local_part_c = local_part.clone().into_ascii_lowercase();
+                if local_part_c.as_str() == "postmaster" {
+                    local_part = "postmaster".to_owned();
                 }
             }
             Ok(Mailbox {
@@ -273,64 +218,74 @@ impl Mailbox {
 
 #[test]
 fn test_mailbox() {
-    let path_1 = Mailbox::parse("rust.is@rustastic.org").unwrap();
-    let path_2 = Mailbox::parse("rust.is.not@rustastic.org").unwrap();
-    let path_3 = Mailbox::parse("\"hello\"@rust").unwrap();
-    let path_4 = Mailbox::parse("rust.is@[127.0.0.1]").unwrap();
-    let path_5 = Mailbox::parse("rust.is@[Ipv6:::1]").unwrap();
-    let path_6 = Mailbox::parse("rust.is@[Ipv6:2001:db8::ff00:42:8329]").unwrap();
-    let path_7 = Mailbox::parse("PosTMAster@ok").unwrap();
-    let path_8 = Mailbox::parse("postmaster@ok").unwrap();
-
-    assert!(path_1 == path_1.clone());
-    assert!(path_2 == path_2.clone());
-    assert!(path_1 != path_2);
-
-    assert_eq!(path_3.local_part.smtp_string.as_slice(), "hello");
-    assert_eq!(path_3.local_part.human_string.as_slice(), "hello");
-    assert_eq!(path_3.foreign_part, MailboxForeignPart::Domain("rust".into_string()));
-
-    let mut s = String::from_char(MAX_MAILBOX_LOCAL_PART_LEN, 'a');
+    let mut s = String::from_iter(repeat('a').take(MAX_MAILBOX_LOCAL_PART_LEN));
     s.push_str("@t.com");
-    assert!(Mailbox::parse(s.as_slice()).is_ok());
-    let mut s = String::from_char(MAX_MAILBOX_LOCAL_PART_LEN + 1, 'a');
+    assert!(Mailbox::parse(s.as_str()).is_ok());
+    let mut s = String::from_iter(repeat('a').take(MAX_MAILBOX_LOCAL_PART_LEN + 1));
     s.push_str("@t.com");
-    assert_eq!(Err(MailboxParseError::LocalPartTooLong), Mailbox::parse(s.as_slice()));
+    assert_eq!(Err(MailboxParseError::LocalPartTooLong), Mailbox::parse(s.as_str()));
     assert_eq!(Err(MailboxParseError::LocalPartUnrecognized), Mailbox::parse("t @t.com{"));
     assert_eq!(Err(MailboxParseError::LocalPartUnrecognized), Mailbox::parse("t "));
     assert_eq!(Err(MailboxParseError::ForeignPartUnrecognized), Mailbox::parse("t@{}"));
     assert_eq!(Err(MailboxParseError::ForeignPartUnrecognized), Mailbox::parse("t@t.com{"));
+
     // The check here is to expect something else than DomainTooLong.
     assert_eq!(Err(MailboxParseError::TooLong), Mailbox::parse(
-        ("rust@".into_string() + String::from_char(MAX_DOMAIN_LEN, 'a'))
-            .as_slice()
+        ("rust@".to_owned() + String::from_iter(repeat('a').take(MAX_DOMAIN_LEN)).as_str())
+            .as_str()
     ));
     assert_eq!(Err(MailboxParseError::DomainTooLong), Mailbox::parse(
-        ("rust@".into_string() + String::from_char(MAX_DOMAIN_LEN + 1, 'a'))
-            .as_slice()
+        ("rust@".to_owned() + String::from_iter(repeat('a').take(MAX_DOMAIN_LEN + 1)).as_ref())
+            .as_str()
     ));
     assert!(Mailbox::parse(
-        ("rust@".into_string() + String::from_char(MAX_MAILBOX_LEN - 5, 'a'))
-            .as_slice()
+        ("rust@".to_owned() + String::from_iter(repeat('a').take(MAX_MAILBOX_LEN - 5)).as_str())
+            .as_str()
     ).is_ok());
     assert_eq!(Err(MailboxParseError::TooLong), Mailbox::parse(
-        ("rust@".into_string() + String::from_char(MAX_MAILBOX_LEN - 4, 'a'))
-            .as_slice()
+        ("rust@".to_owned() + String::from_iter(repeat('a').take(MAX_MAILBOX_LEN - 4)).as_str())
+            .as_str()
     ));
+
+    // Check some common error cases.
     assert_eq!(Err(MailboxParseError::AtNotFound), Mailbox::parse("t"));
-
-    assert_eq!(path_4.foreign_part, MailboxForeignPart::IpAddr(ip::Ipv4Addr(127, 0, 0, 1)));
-    assert_eq!(path_5.foreign_part, MailboxForeignPart::IpAddr(ip::Ipv6Addr(0, 0, 0, 0, 0, 0, 0, 1)));
-    assert_eq!(path_6.foreign_part, MailboxForeignPart::IpAddr(
-        ip::Ipv6Addr(0x2001, 0xdb8, 0x0, 0x0, 0x0, 0xff00, 0x42, 0x8329)
-    ));
-
-    assert_eq!("postmaster", path_7.local_part.human_string.as_slice());
-    assert_eq!("postmaster", path_8.local_part.human_string.as_slice());
-
     assert_eq!(Err(MailboxParseError::ForeignPartUnrecognized), Mailbox::parse("rust.is@[127.0.0.1"));
     assert_eq!(Err(MailboxParseError::ForeignPartUnrecognized), Mailbox::parse("rust.is@[00.0.1]"));
     assert_eq!(Err(MailboxParseError::ForeignPartUnrecognized), Mailbox::parse("rust.is@[::1]"));
     assert_eq!(Err(MailboxParseError::ForeignPartUnrecognized), Mailbox::parse("rust.is@[Ipv6: ::1]"));
     assert_eq!(Err(MailboxParseError::ForeignPartUnrecognized), Mailbox::parse("rust.is@[Ipv6:::1"));
+
+    // Check that we can compare mailboxes
+    let path_1 = Mailbox::parse("rust.is@rustastic.org").unwrap();
+    let path_2 = Mailbox::parse("rust.is.not@rustastic.org").unwrap();
+    let path_3 = Mailbox::parse("\"hello\"@rust").unwrap();
+
+    assert!(path_1 == path_1.clone());
+    assert!(path_2 == path_2.clone());
+    assert!(path_1 != path_2);
+    assert_eq!(path_3.local_part.as_str(), "\"hello\"");
+    assert_eq!(path_3.foreign_part, MailboxForeignPart::Domain("rust".to_owned()));
+
+    // Check that parsing of IP addresses is done right.
+    let path_4 = Mailbox::parse("rust.is@[127.0.0.1]").unwrap();
+    assert_eq!(path_4.foreign_part, MailboxForeignPart::IpAddr(
+        IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))
+    ));
+
+    let path_5 = Mailbox::parse("rust.is@[Ipv6:::1]").unwrap();
+    assert_eq!(path_5.foreign_part, MailboxForeignPart::IpAddr(
+        IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 1))
+    ));
+
+    let path_6 = Mailbox::parse("rust.is@[Ipv6:2001:db8::ff00:42:8329]").unwrap();
+    assert_eq!(path_6.foreign_part, MailboxForeignPart::IpAddr(
+        IpAddr::V6(Ipv6Addr::new(0x2001, 0xdb8, 0x0, 0x0, 0x0, 0xff00, 0x42, 0x8329))
+    ));
+
+    // Make sure that the special postmaster address is always lowercase.
+    let path_7 = Mailbox::parse("PosTMAster@ok").unwrap();
+    assert_eq!("postmaster", path_7.local_part.as_str());
+
+    let path_8 = Mailbox::parse("postmaster@ok").unwrap();
+    assert_eq!("postmaster", path_8.local_part.as_str());
 }

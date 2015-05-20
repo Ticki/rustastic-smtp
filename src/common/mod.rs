@@ -17,8 +17,7 @@
 pub mod stream;
 pub mod mailbox;
 pub mod utils;
-pub mod transaction;
 
-pub static MIN_ALLOWED_MESSAGE_SIZE: uint = 65536;
-pub static MIN_ALLOWED_LINE_SIZE: uint = 1001;
-pub static MIN_ALLOWED_RECIPIENTS: uint = 100;
+pub static MIN_ALLOWED_MESSAGE_SIZE: usize = 65536;
+pub static MIN_ALLOWED_LINE_SIZE: usize = 1000;
+pub static MIN_ALLOWED_RECIPIENTS: usize = 100;
