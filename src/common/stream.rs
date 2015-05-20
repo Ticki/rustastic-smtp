@@ -149,7 +149,10 @@ impl<S: Read> InputStream<S> {
                 unsafe { self.buf.set_len(len + num_bytes) };
                 Ok(num_bytes)
             },
-            Err(err) => Err(err)
+            Err(err) => {
+                unsafe { self.buf.set_len(len) };
+                Err(err)
+            }
         }
     }
 
