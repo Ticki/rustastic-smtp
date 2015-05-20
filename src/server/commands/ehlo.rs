@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::net::tcp::TcpStream;
+use std::net::TcpStream;
 use super::super::ServerConfig;
 use super::super::super::common::stream::InputStream;
 use super::super::super::common::stream::OutputStream;
@@ -70,7 +70,7 @@ fn handle_domain<CT: HeloSeen + HeloHandler>(config: &ServerConfig<CT>, containe
                 output.write_line(format!("250-{}", config.extensions[i - 1]).as_ref()).unwrap();
                 i -= 1;
             }
-            if (i == 1) {
+            if i == 1 {
                 output.write_line(format!("250 {}", config.extensions[i - 1]).as_ref()).unwrap();
             }
         },

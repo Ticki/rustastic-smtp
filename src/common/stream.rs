@@ -14,10 +14,11 @@
 
 //! Tools for reading/writing from SMTP clients to SMTP servers and vice-versa.
 
-use std::io::{Read, Write, ErrorKind};
+use std::io::{BufRead, Read, Write, ErrorKind};
 use std::io::Result as IoResult;
 use std::io::Error as IoError;
 use std::vec::Vec;
+#[cfg(test)]
 use std::fs::File;
 use std::ops::{RangeFrom, IndexMut};
 #[cfg(test)]
@@ -138,12 +139,18 @@ impl<S: Read> InputStream<S> {
         let len = self.buf.len();
         let cap = self.buf.capacity();
 
-        // Read as much data as the buffer can hold without re-allocation.
-        let res = self.stream.read(self.buf.index_mut(RangeFrom {
-            start: self.buf.len()
-        }));
+        unsafe { self.buf.set_len(cap) };
 
-        res
+        // Read as much data as the buffer can hold without re-allocation.
+        match self.stream.read(self.buf.index_mut(RangeFrom {
+            start: len
+        })) {
+            Ok(num_bytes) => {
+                unsafe { self.buf.set_len(len + num_bytes) };
+                Ok(num_bytes)
+            },
+            Err(err) => Err(err)
+        }
     }
 
     /// Read an SMTP command. Ends with `<CRLF>`.
@@ -163,7 +170,7 @@ impl<S: Read> InputStream<S> {
             // and try again.
             None => {
                 match self.fill_buf() {
-                    Ok(_) => {
+                    Ok(num_bytes_read) => {
                         match position_crlf(self.buf.as_ref()) {
                             Some(last_crlf) => {
                                 let s = &self.buf[.. last_crlf];
@@ -250,7 +257,7 @@ fn test_write_line() {
         stream.write_line("ByeBye").unwrap();
     }
     let mut file_read: File;
-    let mut expected: String;
+    let mut expected = String::new();
 
     file_read = OpenOptions::new()
         .read(true)

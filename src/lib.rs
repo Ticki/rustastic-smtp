@@ -61,10 +61,14 @@
 
 #![deny(unused_qualifications)]
 #![deny(non_upper_case_globals)]
-#![deny(unused_typecasts)]
 #![deny(missing_docs)]
-#![deny(unused_results)]
-
+// #![deny(unused_results)]
+#![feature(ip_addr)]
+#![feature(libc)]
+#![feature(convert)]
+#![feature(str_char)]
+#![feature(std_misc)]
+ 
 pub mod client;
 pub mod common;
 pub mod server;

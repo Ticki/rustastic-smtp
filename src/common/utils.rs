@@ -14,9 +14,11 @@
 
 //! Utility functions used in SMTP clients and SMTP servers.
 
-use std::net::ip::{IpAddr, Ipv4Addr, Ipv6Addr};
+use std::net::IpAddr;
 use std::str::FromStr;
 use std::net::AddrParseError;
+#[cfg(test)]
+use std::net::{Ipv4Addr, Ipv6Addr};
 
 /// Returns the length of the longest subdomain found at the beginning
 /// of the passed string.
@@ -529,7 +531,7 @@ pub fn get_mailbox_ip(s: &str) -> Option<(&str, IpAddr)> {
 
         // Turn the result into an Option.
         res.map(|addr| (ip, addr)).ok()
-    }));
+    }))
 }
 
 #[test]

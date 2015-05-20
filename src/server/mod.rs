@@ -18,14 +18,15 @@
 extern crate libc;
 
 use super::common::stream::{InputStream, OutputStream};
-use std::net::tcp::{TcpListener, TcpStream};
-use std::net::{SocketAddr, IpAddr};
+use std::net::{TcpListener, TcpStream};
+use std::net::IpAddr;
 use std::io::Result as IoResult;
 use std::thread;
 use std::borrow::ToOwned;
 use std::sync::Arc;
 use std::ops::Deref;
 use std::clone::Clone;
+use std::os::unix::io::{FromRawFd, AsRawFd};
 
 /// Core SMTP commands
 pub mod commands;
@@ -113,10 +114,18 @@ pub type MiddlewareFn<CT, ST> = fn(
 /// It is defined by the string you find at the start of the command, for
 /// example "MAIL FROM:" or "EHLO ", as well as a bunch of middleware parts
 /// that are executed sequentially until one says to stop.
-#[derive(Clone)]
 pub struct Command<CT, ST> {
     start: Option<String>,
     front_middleware: Option<NextMiddleware<CT, ST>>,
+}
+
+impl<CT, ST> Clone for Command<CT, ST> {
+    fn clone(&self) -> Command<CT, ST> {
+        Command {
+            start: self.start.clone(),
+            front_middleware: self.front_middleware.clone()
+        }
+    }
 }
 
 impl<CT, ST> Command<CT, ST> {
@@ -166,7 +175,6 @@ impl<CT, ST> Command<CT, ST> {
 }
 
 /// An SMTP server configuration.
-#[derive(Clone)]
 pub struct ServerConfig<CT> {
     hostname: String,
     max_recipients: usize,
@@ -175,6 +183,27 @@ pub struct ServerConfig<CT> {
     max_text_line_size: usize,
     commands: Vec<Command<CT, TcpStream>>,
     extensions: Vec<String>
+}
+
+impl<CT> Clone for ServerConfig<CT> {
+    fn clone(&self) -> ServerConfig<CT> {
+        // TcpStream is non clonable, which seems to disturb the compiler, so we clone
+        // the commands vector (which is made of commands that take a TcpStream) manually.
+        let mut cloned_commands = Vec::with_capacity(self.commands.len());
+        for c in self.commands.iter() {
+            cloned_commands.push(c.clone());
+        }
+
+        ServerConfig {
+            hostname: self.hostname.clone(),
+            max_recipients: self.max_recipients,
+            max_message_size: self.max_message_size,
+            max_command_line_size: self.max_command_line_size,
+            max_text_line_size: self.max_text_line_size,
+            commands: cloned_commands,
+            extensions: self.extensions.clone()
+        }
+    }
 }
 
 /// An SMTP server, with no commands by default.
@@ -200,7 +229,7 @@ pub type ServerResult<T> = Result<T, ServerError>;
 // TODO: logging, via a Trait on the container?
 // TODO: fatal error handling
 
-impl<CT: Send + Clone> Server<CT> {
+impl<CT: 'static + Send + Sync + Clone> Server<CT> {
     /// Creates a new SMTP server.
     ///
     /// The container can be of any type and can be used to get access to a
@@ -339,8 +368,12 @@ impl<CT: Send + Clone> Server<CT> {
         let thread_handle = thread::spawn(move || {
             match stream_res {
                 Ok(stream) => {
-                    let mut input = InputStream::new(stream.clone(), 1000, false);
-                    let mut output = OutputStream::new(stream.clone(), false);
+                    // Clone the stream. This uses "unsafe" but is safe because we use this
+                    // stream only for reading and the other one only for writing.
+                    let mut input = InputStream::new(unsafe {
+                        TcpStream::from_raw_fd(stream.as_raw_fd())
+                    }, 1000, false);
+                    let mut output = OutputStream::new(stream, false);
 
                     Server::<CT>::handle_commands(
                         config.deref(),

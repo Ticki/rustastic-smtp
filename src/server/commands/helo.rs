@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::net::tcp::TcpStream;
+use std::net::TcpStream;
 use super::super::ServerConfig;
 use super::super::super::common::stream::InputStream;
 use super::super::super::common::stream::OutputStream;

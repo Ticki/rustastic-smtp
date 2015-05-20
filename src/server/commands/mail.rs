@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::net::tcp::TcpStream;
+use std::net::TcpStream;
 use super::super::ServerConfig;
 use super::super::super::common::mailbox::Mailbox;
 use super::super::super::common::stream::InputStream;
@@ -66,7 +66,7 @@ fn handle_no_sender<CT: MailHandler>(config: &ServerConfig<CT>, container: &mut 
     }
 }
 
-fn handle_sender<CT: MailHandler>(config: &ServerConfig<CT>, container: &mut CT, _: &mut Input, output: &mut Output, line: &str, _: Next<CT>) {
+fn handle_sender<CT: MailHandler>(_: &ServerConfig<CT>, container: &mut CT, _: &mut Input, output: &mut Output, line: &str, _: Next<CT>) {
     match Mailbox::parse(&line[1 .. line.len() - 1]) {
         Err(err) => {
             output.write_line(format!("553 Email address invalid: {:?}", err).as_ref()).unwrap();
