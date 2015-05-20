@@ -169,20 +169,18 @@ impl<S: Read> InputStream<S> {
             // First, let's check if the buffer already contains a line. This
             // reduces the number of syscalls.
             Some(last_crlf) => {
-                let s = &self.buf[.. last_crlf];
                 self.last_crlf = Some(last_crlf);
-                Ok(s)
+                Ok(&self.buf[.. last_crlf])
             },
             // If we don't have a line in the buffer, we'll read more input
             // and try again.
             None => {
                 match self.fill_buf() {
-                    Ok(num_bytes_read) => {
+                    Ok(_) => {
                         match position_crlf(self.buf.as_ref()) {
                             Some(last_crlf) => {
-                                let s = &self.buf[.. last_crlf];
                                 self.last_crlf = Some(last_crlf);
-                                Ok(s)
+                                Ok(&self.buf[.. last_crlf])
                             },
                             None => {
                                 // If we didn't find a line, it means we had
