@@ -81,7 +81,7 @@
 
 #![deny(unused_qualifications, non_upper_case_globals, missing_docs)]
 // #![deny(unused_results)]
-#![feature(ip_addr, libc, convert, str_char, std_misc)]
+#![feature(ip_addr, libc, convert, str_char, std_misc, owned_ascii_ext)]
 
 pub mod client;
 pub mod common;
